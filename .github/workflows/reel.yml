@@ -1,0 +1,48 @@
+# 위클리 설명 릴스 굽기 — 업로드 서버(Worker)가 repository_dispatch(reel)로 부른다.
+# 발표 자료·녹음·대본은 저장소·로그·artifact에 남기지 않는다 (make.mjs가 단계 이름만 찍음).
+name: reel
+on:
+  repository_dispatch:
+    types: [reel]
+  workflow_dispatch:
+    inputs:
+      wid:
+        description: '주 id (w-YYYY-MM-DD 또는 w-test)'
+        required: true
+      fake:
+        description: '가짜 AI(사인파 목소리·시험 대본)로 흐름만 시험'
+        type: boolean
+        default: false
+
+concurrency:
+  group: reel-${{ github.event.client_payload.wid || inputs.wid }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: 도구 설치
+        run: |
+          sudo apt-get update -qq > /dev/null
+          sudo apt-get install -y -qq poppler-utils > /dev/null
+          npm ci --no-audit --no-fund > /dev/null
+          npx playwright install --with-deps chromium > /dev/null
+      - name: 릴스 만들기
+        env:
+          WID: ${{ github.event.client_payload.wid || inputs.wid }}
+          FAKE: ${{ github.event.client_payload.fake || inputs.fake }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RENDER_KEY: ${{ secrets.RENDER_KEY }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          REEL_CHARACTER: ${{ vars.REEL_CHARACTER }}
+        run: node make.mjs "$WID"

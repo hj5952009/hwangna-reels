@@ -26,14 +26,14 @@ export const outroLine = (s) => `황금나침반 ${s.week} 위클리 · 발표 $
 // 끝인사 말 (목소리로 읽는 마지막 줄)
 export const outroSpeech = (s) => `황금나침반 ${s.week} 위클리, 발표는 ${s.presenter}였어요.`;
 
-export function validate(s) {
+export function validate(s, { minChars = LIMITS.minChars } = {}) {
   const v = [];
   if (!s || typeof s !== 'object') return ['대본 형식이 아니에요'];
   if (!['econ', 'fin'].includes(s.slot)) v.push('슬롯이 econ/fin이 아니에요');
   if (!String(s.hook || '').trim()) v.push('훅이 비었어요');
   if (!String(s.summary || '').trim()) v.push('한 줄 정리가 비었어요');
   const n = spokenLength(s);
-  if (n < LIMITS.minChars || n > LIMITS.maxChars) v.push(`길이 ${n}자 (${LIMITS.minChars}~${LIMITS.maxChars}자여야 해요)`);
+  if (n < minChars || n > LIMITS.maxChars) v.push(`길이 ${n}자 (${minChars}~${LIMITS.maxChars}자여야 해요)`);
   const beats = Array.isArray(s.beats) ? s.beats : [];
   if (beats.length < LIMITS.minBeats || beats.length > LIMITS.maxBeats) v.push(`장면 ${beats.length}개 (${LIMITS.minBeats}~${LIMITS.maxBeats}개여야 해요)`);
   beats.forEach((b, i) => {

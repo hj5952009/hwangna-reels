@@ -3,7 +3,7 @@
 // 발표 자료·대본 내용도 로그에 찍지 않는다 (공개 저장소 Actions 로그).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { validate, spokenLength, LIMITS, SHOW_TYPES, MOODS } from './rules.mjs';
+import { validate, LIMITS, SHOW_TYPES, MOODS } from './rules.mjs';
 import { toSpeech } from './readout.mjs';
 
 const BASE = 'https://generativelanguage.googleapis.com';
@@ -90,7 +90,7 @@ const SHOW = {
     unit: { type: 'string', description: 'number일 때 단위 (예: %, 원, 조 원)' },
     a: { type: 'string' }, b: { type: 'string' },
     page: { type: 'integer', description: 'slide일 때 PDF 쪽 번호 (1부터)' },
-    index: { type: 'integer', description: 'photo일 때 사진 번호 (0부터)' },
+    photo: { type: 'integer', description: 'photo일 때 사진 번호 (0부터)' },
   },
   required: ['type', 'text'],
 };
@@ -122,7 +122,7 @@ function writePrompt(meta, problems) {
     '- 숫자·사실은 첨부 자료에 있는 것만 쓴다. 자료에 없는 숫자를 지어내지 않는다.',
     "- 사라·팔라·오른다 단정 같은 투자 권유 표현을 쓰지 않는다. 특정 종목을 추천하지 않는다.",
     meta.slot === 'fin' ? "- 금융 릴스이므로 summary 끝에 '투자 권유가 아니에요'를 꼭 넣는다." : '',
-    `- show.type은 ${SHOW_TYPES.join('·')} 중 하나. number는 value(숫자)·unit, compare는 a·b(짧게), slide는 page(1부터), photo는 index(0~${Math.max(0, (meta.photos || 0) - 1)}).`,
+    `- show.type은 ${SHOW_TYPES.join('·')} 중 하나. number는 value(숫자)·unit, compare는 a·b(짧게), slide는 page(1부터), photo는 photo(0~${Math.max(0, (meta.photos || 0) - 1)}).`,
     (meta.photos || 0) > 0 ? `- 발표 현장 사진이 ${meta.photos}장 있으니 photo 장면을 하나 넣어도 좋아.` : '- 사진이 없으니 photo 장면은 쓰지 않는다.',
     '- caption: 인스타 본문용 2~3줄 요약 + 해시태그 3개 안쪽.',
   ].filter(Boolean);
@@ -181,8 +181,7 @@ export async function checkScript({ key, script, sources, sleep = realSleep }) {
     throw new Error(scrub(key, `근거 확인 실패: ${e instanceof SyntaxError ? 'JSON 형식이 깨졌어요' : e.message}`));
   }
   const s = withMeta(out, { slot, week, presenter, title: script.title });
-  const n = spokenLength(s);
-  const v = validate(s).filter((x) => !(x.startsWith('길이') && n >= CHECK_MIN && n <= LIMITS.maxChars));
+  const v = validate(s, { minChars: CHECK_MIN });
   if (v.length) throw new Error(scrub(key, `근거 확인 뒤 대본이 규칙에 안 맞아요: ${v.join(' / ')}`));
   return s;
 }
