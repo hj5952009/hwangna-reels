@@ -55,3 +55,13 @@ test('5xx는 다시 시도, 4xx는 바로 실패', async () => {
   globalThis.fetch = async () => new Response('no', { status: 403 });
   await assert.rejects(c.bundle('w-2026-11-24'), /403/);
 });
+
+test('조각 받기에 올리기 번호(up)를 붙인다', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); return new Response(new Uint8Array([1])); };
+  const c = createClient({ url: 'https://w.example', renderKey: RK });
+  await c.get('w-2026-11-24', 'econ', 'audio', 2, 'a1aa');
+  await c.get('w-2026-11-24', 'photo', 'jpg', 0);
+  assert.equal(urls[0], 'https://w.example/reels/w-2026-11-24/file/econ/audio/2?up=a1aa');
+  assert.equal(urls[1], 'https://w.example/reels/w-2026-11-24/file/photo/jpg/0');
+});

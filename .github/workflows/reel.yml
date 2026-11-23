@@ -41,6 +41,7 @@ jobs:
         env:
           WID: ${{ github.event.client_payload.wid || inputs.wid }}
           FAKE: ${{ github.event.client_payload.fake || inputs.fake }}
+          REQ_AT: ${{ github.event.client_payload.req }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RENDER_KEY: ${{ secrets.RENDER_KEY }}
           WORKER_URL: ${{ vars.WORKER_URL }}

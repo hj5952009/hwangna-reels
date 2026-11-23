@@ -28,9 +28,9 @@ async function realDeps() {
   return { uploadSources: g.uploadSources, writeScript: g.writeScript, checkScript: g.checkScript, speak: g.speak, render, pdfPages };
 }
 
-async function fetchAll(client, wid, slot, kind, list) {
+async function fetchAll(client, wid, slot, kind, list, up) {
   const parts = [];
-  for (const n of [...list].sort((a, b) => a - b)) parts.push(await client.get(wid, slot, kind, n));
+  for (const n of [...list].sort((a, b) => a - b)) parts.push(await client.get(wid, slot, kind, n, up));
   return Buffer.concat(parts);
 }
 
@@ -39,6 +39,8 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, varian
   const metaSlot = (bundle.meta && bundle.meta[slot]) || {};
   const files = (bundle.files && bundle.files[slot]) || {};
   const photoList = (bundle.files && bundle.files.photo) || [];
+  const ups = (bundle.ups && bundle.ups[slot]) || {};
+  const photoUp = (bundle.ups && bundle.ups.photo) || undefined;
   const meta = { slot, week: (bundle.meta && bundle.meta.week) || '', presenter: metaSlot.presenter || '', title: metaSlot.title || '', photos: photoList.length };
   const dir = join(work, slot); mkdirSync(dir, { recursive: true });
 
@@ -47,9 +49,9 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, varian
 
   await step('자료 받기');
   let pdfPath = null;
-  if (hasPdf) { pdfPath = join(dir, 'talk.pdf'); writeFileSync(pdfPath, await fetchAll(client, wid, slot, 'pdf', files.pdf)); }
+  if (hasPdf) { pdfPath = join(dir, 'talk.pdf'); writeFileSync(pdfPath, await fetchAll(client, wid, slot, 'pdf', files.pdf, ups.pdf || undefined)); }
   const assets = join(dir, 'assets'); mkdirSync(assets, { recursive: true });
-  for (const n of photoList) writeFileSync(join(assets, `photo${n}.jpg`), await client.get(wid, 'photo', 'jpg', n));
+  for (const n of photoList) writeFileSync(join(assets, `photo${n}.jpg`), await client.get(wid, 'photo', 'jpg', n, photoUp));
 
   let script;
   if (rerender) {
@@ -58,7 +60,7 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, varian
     if (v.length) throw new Error(`고친 대본이 규칙에 안 맞아요: ${v.join(' / ')}`);
   } else {
     let audioPath = null;
-    if (hasAudio) { audioPath = join(dir, `talk.${metaSlot.audioExt || 'm4a'}`); writeFileSync(audioPath, await fetchAll(client, wid, slot, 'audio', files.audio)); }
+    if (hasAudio) { audioPath = join(dir, `talk.${metaSlot.audioExt || 'm4a'}`); writeFileSync(audioPath, await fetchAll(client, wid, slot, 'audio', files.audio, ups.audio || undefined)); }
     await step('대본 쓰기');
     const sources = await deps.uploadSources({ key, audioPath, pdfPath });
     const draft = await deps.writeScript({ key, audioPath, pdfPath, meta, sources });
@@ -85,9 +87,21 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, varian
   log(slot, '끝');
 }
 
-export async function make({ wid, slots, rerender = null, client, key, fake = false, deps = null, variant }) {
+// 서버 KV는 지역마다 최대 60초 늦게 보일 수 있어, dispatch에 실린 요청 번호(req)와 같은 묶음을 읽을 때까지 기다린다.
+// reqAt이 없으면(손으로 실행) 첫 묶음을 그대로 쓴다.
+export async function freshBundle(client, wid, reqAt, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), tries = 13, waitMs = 10000 } = {}) {
+  const want = Number(reqAt) || 0;
+  for (let i = 0; ; i += 1) {
+    const b = await client.bundle(wid);
+    if (!want || Number((b.request || {}).at) === want) return b;
+    if (i + 1 >= tries) throw new Error('최신 요청을 서버에서 읽지 못했어요 — 앱에서 다시 만들어 주세요');
+    await sleep(waitMs);
+  }
+}
+
+export async function make({ wid, slots, rerender = null, client, key, fake = false, deps = null, variant, bundle: given = null }) {
   const d = deps || (fake ? (await import('./src/fake-ai.mjs')).fakeDeps(await realDeps()) : await realDeps());
-  const bundle = await client.bundle(wid);
+  const bundle = given || (await client.bundle(wid));
   const work = mkdtempSync(join(tmpdir(), 'reel-'));
   const result = {};
   try {
@@ -115,12 +129,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const fake = process.argv.includes('--fake') || process.env.FAKE === 'true';
   if (!/^w-\d{4}-\d{2}-\d{2}$|^w-test$/.test(String(wid))) { console.error('주 id 형식이 아니에요'); process.exit(2); }
   const client = createClient({ url: process.env.WORKER_URL, renderKey: process.env.RENDER_KEY });
-  const req = (await client.bundle(wid)).request || {};
+  const bundle = await freshBundle(client, wid, process.env.REQ_AT);
+  const req = bundle.request || {};
   const slots = (req.slots || ['econ', 'fin']).filter((s) => s === 'econ' || s === 'fin');
   const key = process.env.GEMINI_API_KEY || '';
   if (!fake && !key) { console.error('GEMINI_API_KEY 비밀값이 없어요'); process.exit(2); }
   const variant = process.env.REEL_CHARACTER || undefined;
-  const r = await make({ wid, slots, rerender: req.rerender || null, client, key, fake, variant });
+  const r = await make({ wid, slots, rerender: req.rerender || null, client, key, fake, variant, bundle });
   console.log(JSON.stringify(r));
   if (!Object.values(r).includes('ready')) process.exit(1);
 }

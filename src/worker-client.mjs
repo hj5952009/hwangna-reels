@@ -23,7 +23,7 @@ export function createClient({ url, renderKey, sleep = (ms) => new Promise((r) =
   }
   return {
     bundle: async (wid) => (await req(`/reels/${wid}/bundle`)).json(),
-    get: async (wid, slot, kind, n) => Buffer.from(await (await req(`/reels/${wid}/file/${slot}/${kind}/${n}`)).arrayBuffer()),
+    get: async (wid, slot, kind, n, up) => Buffer.from(await (await req(`/reels/${wid}/file/${slot}/${kind}/${n}${up ? `?up=${encodeURIComponent(up)}` : ''}`)).arrayBuffer()),
     putOut: async (wid, slot, kind, buf) => {
       const of = Math.max(1, Math.ceil(buf.length / PART));
       let last;

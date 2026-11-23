@@ -126,3 +126,25 @@ test('가짜(fake) 모드는 자료가 없어도 시험 대본으로 끝까지 �
   assert.equal(last(c.states, 'econ').state, 'ready');
   assert.equal(last(c.states, 'fin').state, 'ready');
 });
+
+test('freshBundle: dispatch의 요청 번호와 같은 묶음을 읽을 때까지 기다림 (KV 지역 지연)', async () => {
+  const { freshBundle } = await import('../make.mjs');
+  let n = 0; const slept = [];
+  const client = { bundle: async () => ({ request: { at: n++ < 2 ? 100 : 200 } }) };
+  const b = await freshBundle(client, WID, 200, { sleep: async (ms) => slept.push(ms) });
+  assert.equal(b.request.at, 200); assert.equal(slept.length, 2);
+  await assert.rejects(freshBundle({ bundle: async () => ({ request: { at: 1 } }) }, WID, 2, { sleep: async () => {}, tries: 3 }), /최신 요청/);
+  const any = await freshBundle({ bundle: async () => ({ request: { at: 1 } }) }, WID, 0, { sleep: async () => {} });
+  assert.equal(any.request.at, 1, '번호가 없으면(손으로 실행) 그대로');
+});
+
+test('자료 조각은 묶음의 올리기 번호(ups)로 받는다', async () => {
+  const c = fakeClient({ econ: { pdf: [0], audio: [0] }, fin: { pdf: [], audio: [] }, photo: [0] });
+  const ups = [];
+  c.get = async (wid, slot, kind, n, up) => { ups.push(`${slot}/${kind}/${n}@${up}`); return Buffer.from('x'); };
+  const base = c.bundle;
+  c.bundle = async () => ({ ...(await base()), ups: { econ: { pdf: 'p1aa', audio: 'a1aa' }, fin: { pdf: '', audio: '' }, photo: 'ph1a' } });
+  const { deps } = fakeDeps();
+  await make({ wid: WID, slots: ['econ'], client: c, key: 'k', deps });
+  assert.deepEqual(ups.sort(), ['econ/audio/0@a1aa', 'econ/pdf/0@p1aa', 'photo/jpg/0@ph1a']);
+});
