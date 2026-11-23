@@ -23,3 +23,7 @@ gh workflow run reel.yml -f wid=w-test -f fake=true   # Actions 흐름 시험 (�
 ```
 
 글꼴: Black Han Sans, Noto Sans KR (SIL Open Font License, `fonts/`).
+
+## 앱 화면 시험 (가짜 서버)
+- `node dev/mock-worker.mjs 8791` — 앱의 `/reels/*`·`/publish`를 흉내 내는 가짜 서버. 만들기를 누르면 단계가 1.5초씩 넘어가고 시험용 영상으로 ready가 된다. **실제 인스타에는 아무것도 안 올린다.**
+- 앱 CSP는 `https://*.workers.dev`만 허락하므로, 미리보기는 app 사본의 index.html CSP에 `http://localhost:8791`을 더해서 쓴다(제품 CSP에는 넣지 않음).
