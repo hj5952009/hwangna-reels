@@ -22,7 +22,7 @@ function fakeClient(files) {
   const states = []; const puts = []; const gets = [];
   return {
     states, puts, gets,
-    bundle: async () => ({ meta: { week: '11월 4주차', meet: '2026-11-24', econ: { presenter: '김회준', title: '금리와 환율' }, fin: { presenter: '이나침', title: '예금보험' } }, files }),
+    bundle: async () => ({ meta: { week: '11월 4주차', meet: '2026-11-24', econ: { presenter: '발표자', title: '금리와 환율' }, fin: { presenter: '이나침', title: '예금보험' } }, files }),
     get: async (wid, slot, kind, n) => { gets.push(`${slot}/${kind}/${n}`); return Buffer.from(`${slot}-${kind}-${n}`); },
     putOut: async (wid, slot, kind, buf) => { puts.push(`${slot}/${kind}`); return `https://w.example/m/${slot}-${kind}`; },
     state: async (wid, slot, st) => { states.push({ slot, ...st }); },
@@ -56,7 +56,7 @@ test('경제 자료만 있으면 경제는 ready, 금융은 자료 없음으로 
   // 대본에 쓰인 슬라이드 쪽만 그림으로
   assert.deepEqual(calls.pdfPages[0], [2]);
   // 발표자·사진 수가 대본 요청에 들어감
-  assert.equal(calls.writeScript[0].meta.presenter, '김회준');
+  assert.equal(calls.writeScript[0].meta.presenter, '발표자');
   assert.equal(calls.writeScript[0].meta.photos, 1);
 });
 
@@ -72,7 +72,7 @@ test('경제 대본 쓰기가 실패해도 금융은 만들어짐', async () => 
 test('다시 굽기(rerender)는 대본 쓰기 없이 목소리·렌더만', async () => {
   const c = fakeClient({ econ: { pdf: [0], audio: [] }, fin: { pdf: [], audio: [] }, photo: [] });
   const { deps, calls } = fakeDeps();
-  const edited = script('econ', '김회준'); edited.hook = '고친 훅이에요?';
+  const edited = script('econ', '발표자'); edited.hook = '고친 훅이에요?';
   await make({ wid: WID, slots: ['econ'], rerender: { econ: edited }, client: c, key: 'k', deps });
   assert.equal(calls.writeScript.length, 0);
   assert.equal(calls.checkScript.length, 0);
@@ -86,7 +86,7 @@ test('다시 굽기(rerender)는 대본 쓰기 없이 목소리·렌더만', asy
 test('다시 굽기 대본이 규칙을 어기면 failed', async () => {
   const c = fakeClient({ econ: { pdf: [0], audio: [] }, fin: { pdf: [], audio: [] }, photo: [] });
   const { deps } = fakeDeps();
-  const bad = script('econ', '김회준'); bad.beats[0].line += ' 지금 사세요';
+  const bad = script('econ', '발표자'); bad.beats[0].line += ' 지금 사세요';
   await make({ wid: WID, slots: ['econ'], rerender: { econ: bad }, client: c, key: 'k', deps });
   assert.equal(last(c.states, 'econ').state, 'failed');
   assert.match(last(c.states, 'econ').error, /권유/);
@@ -107,7 +107,7 @@ test('ready 상태에는 영상·표지·대본·문구·렌더 시각이 모두
     assert.ok(s.renderedAt >= before);
   }
   // 목소리 마지막 줄은 끝인사(주차·발표자)
-  assert.match(calls.speak[0].lines.at(-1), /황금나침반 11월 4주차 위클리, 발표는 김회준/);
+  assert.match(calls.speak[0].lines.at(-1), /황금나침반 11월 4주차 위클리, 발표는 발표자/);
   // 중간에 making 단계 보고가 있었음
   assert.ok(c.states.some((s) => s.state === 'making' && s.step));
 });

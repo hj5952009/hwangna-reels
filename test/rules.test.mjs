@@ -11,7 +11,7 @@ function make(len, extra = {}) {
     { line: '', show: { type: 'compare', a: '한국', b: '미국', text: '금리 차이' }, mood: 'stress' },
     { line: '', show: { type: 'keyword', text: '환율' }, mood: 'surprise' },
   ];
-  const s = { slot: 'econ', week: '11월 4주차', presenter: '김회준', title: '금리와 환율', hook: '금리는 그대로인데 환율은 왜 올랐을까?', beats, summary: '금리 차이가 벌어지면 환율이 오른다.', caption: '이번 주 위클리 경제 정리', ...extra };
+  const s = { slot: 'econ', week: '11월 4주차', presenter: '발표자', title: '금리와 환율', hook: '금리는 그대로인데 환율은 왜 올랐을까?', beats, summary: '금리 차이가 벌어지면 환율이 오른다.', caption: '이번 주 위클리 경제 정리', ...extra };
   const base = spokenLength({ ...s, beats: beats.map((b) => ({ ...b, line: '' })) });
   const each = Math.floor((len - base) / beats.length);
   s.beats = beats.map((b, i) => ({ ...b, line: '가'.repeat(i === beats.length - 1 ? len - base - each * (beats.length - 1) : each) }));
@@ -43,7 +43,7 @@ test('고지: 금융 릴스는 투자 권유 아님 문구가 있어야 함', ()
   assert.deepEqual(validate(s), []);
 });
 test('끝장: 주차·발표자 형식', () => {
-  assert.equal(outroLine(make(400)), '황금나침반 11월 4주차 위클리 · 발표 김회준');
+  assert.equal(outroLine(make(400)), '황금나침반 11월 4주차 위클리 · 발표 발표자');
   assert.ok(validate(make(400, { week: '이번 주' })).some((v) => v.includes('끝장')));
   assert.ok(validate(make(400, { presenter: '' })).some((v) => v.includes('끝장')));
 });

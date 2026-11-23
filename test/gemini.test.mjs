@@ -10,7 +10,7 @@ const KEY = 'TEST-KEY-should-never-appear-123';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 const nosleep = async () => {};
-const meta = { slot: 'econ', week: '11월 4주차', presenter: '김회준', title: '금리와 환율', photos: 1 };
+const meta = { slot: 'econ', week: '11월 4주차', presenter: '발표자', title: '금리와 환율', photos: 1 };
 
 function goodScript(len = 360) {
   const beats = [
@@ -49,7 +49,7 @@ test('writeScript: 규칙 위반(720자)이면 이유를 넣어 한 번 더 요�
   assert.equal(gens.length, 2);
   const second = String(gens[1].init.body);
   assert.match(second, /길이 7\d\d자/);
-  assert.equal(s.slot, 'econ'); assert.equal(s.week, '11월 4주차'); assert.equal(s.presenter, '김회준');
+  assert.equal(s.slot, 'econ'); assert.equal(s.week, '11월 4주차'); assert.equal(s.presenter, '발표자');
   assert.ok(s.hook.length > 0 && s.beats.length === 3);
   // 업로드한 PDF를 fileData로 넘김
   assert.match(String(gens[0].init.body), /"fileUri":"https:\/\/gen\/files\/abc"/);
@@ -71,7 +71,7 @@ test('checkScript: 근거 없는 줄을 뺀 결과와 check 정보를 돌려줌'
   globalThis.fetch = fakeGemini([textResp(checked)], calls);
   const s = await checkScript({ key: KEY, script: base, sources: [{ fileData: { fileUri: 'https://gen/files/abc', mimeType: 'application/pdf' } }] });
   assert.deepEqual(s.check.removed, ['미국 금리가 7%']);
-  assert.equal(s.presenter, '김회준');
+  assert.equal(s.presenter, '발표자');
   assert.match(String(calls[0].init.body), /근거/);
 });
 
