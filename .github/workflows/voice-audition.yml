@@ -1,0 +1,31 @@
+# 나침이 목소리 오디션 (손으로만 실행) — 정해진 시험 대사 두 줄만 읽는다. 결과 mp3는 3일 뒤 사라짐
+name: voice-audition
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund > /dev/null
+      - name: 목소리 만들기
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node dev/voice-audition.mjs audition
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-audition
+          path: audition/*.mp3
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-audition-list
+          path: audition/list.json
+          retention-days: 3
