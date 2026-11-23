@@ -86,7 +86,7 @@ test('speak: 429 두 번 뒤 세 번째에 성공하면 Track을 돌려줌', asy
   globalThis.fetch = async (url, init) => {
     tries++;
     if (tries <= 2) return json({ error: { code: 429, message: 'quota' } }, 429);
-    return json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: pcmB64() } }] } }] });
+    return json(ttsResp());
   };
   const out = mkdtempSync(join(tmpdir(), 'sp-'));
   const t = await speak({ key: KEY, lines: ['금리 2.5%예요'], outDir: out, sleep: nosleep });
@@ -101,12 +101,35 @@ test('speak: 429 두 번 뒤 세 번째에 성공하면 Track을 돌려줌', asy
   assert.ok(existsSync(l.wav)); assert.equal(readFileSync(l.wav).subarray(0, 4).toString(), 'RIFF');
 });
 
+// Gemini 3.8 TTS(Interactions API) 응답: steps[].content[]의 audio (기본 WAV, RIFF 머리 있음)
+function ttsResp() {
+  const pcm = Buffer.from(pcmB64(), 'base64'); const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8); h.write('fmt ', 12); h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(24000, 24); h.writeUInt32LE(48000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return { steps: [{ type: 'model_output', content: [{ type: 'audio', mime_type: 'audio/wav', data: Buffer.concat([h, pcm]).toString('base64') }] }] };
+}
+
 test('speak: 목소리 요청에는 읽기 변환된 글자가 들어감', async () => {
   const bodies = [];
-  globalThis.fetch = async (url, init) => { bodies.push(String(init.body)); return json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: pcmB64() } }] } }] }); };
+  globalThis.fetch = async (url, init) => { bodies.push(String(init.body)); return json(ttsResp()); };
   await speak({ key: KEY, lines: ['GDP 3조 원'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
   assert.match(bodies[0], /지디피 삼 조 원/);
-  assert.match(bodies[0], /"responseModalities":\["AUDIO"\]/);
+});
+
+// 3.8 TTS는 text를 그대로 읽으므로 말투 지시는 speech_metadata.style에만 (회장 확인: 지시문을 소리 내어 읽었음 26.11.24)
+test('speak: 말투 지시는 소리 내어 읽지 않게 style 칸에만 넣음', async () => {
+  const reqs = [];
+  globalThis.fetch = async (url, init) => { reqs.push({ url: String(url), body: JSON.parse(String(init.body)) }); return json(ttsResp()); };
+  await speak({ key: KEY, lines: ['가게는 잘 되는데요'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
+  const { url, body } = reqs[0];
+  assert.match(url, /\/v1beta\/interactions$/);
+  const item = body.input[0].content[0];
+  assert.equal(item.text, '가게는 잘 되는데요'); // 지시문이 섞이지 않음
+  assert.equal(item.annotations[0].type, 'speech_metadata');
+  assert.ok(item.annotations[0].style.length > 0);
+  assert.equal(body.generation_config.speech_config[0].voice, 'Kore');
+  assert.equal(body.response_format.type, 'audio');
 });
 
 test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () => {

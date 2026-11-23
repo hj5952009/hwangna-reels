@@ -10,23 +10,28 @@ const OUT = process.argv[2] || 'audition';
 const key = process.env.GEMINI_API_KEY || '';
 if (!key) { console.log('GEMINI_API_KEY 없음'); process.exit(1); }
 const LINES = ['가게는 잘 되는데, 대출은 왜 안 나올까요?', '그래서 나온 게 에스씨비, 소상공인 특화 신용평가예요.'];
-const VOICES = ['Puck', 'Leda', 'Fenrir', 'Laomedeia', 'Sadachbia', 'Kore'];
+// 말투는 speech_metadata.style로만 감 (소리 내어 읽지 않음)
 const STYLES = {
-  A: '귀엽고 통통 튀는 마스코트 캐릭터처럼, 밝고 살짝 높은 톤의 친근한 해요체로 또박또박 읽어 주세요: ',
-  B: '호기심 많은 꼬마 탐험가 캐릭터처럼 신나고 생동감 있게, 문장 끝을 살짝 올려 경쾌하게 읽어 주세요: ',
+  A: 'cute, bouncy cartoon mascot; bright and slightly high-pitched; friendly and crisp',
+  B: 'curious little explorer character; excited and lively, sentence endings lifting playfully',
 };
 mkdirSync(OUT, { recursive: true });
 const ff = (args) => { const r = spawnSync(ffmpeg, ['-y', '-loglevel', 'error', ...args]); if (r.status) throw new Error(String(r.stderr).slice(-300)); };
 const list = [];
 let n = 0;
-for (const v of VOICES) {
-  for (const [sk, style] of Object.entries(STYLES)) {
+// 무료 등급(3.8 Flash TTS 분당 3회·하루 10회)에 맞춰 후보 하나 = 요청 하나, 요청 사이 21초, 하루 9개
+const PICK = (process.env.AUDITION_PICK || 'Puck:A,Leda:A,Fenrir:A,Laomedeia:A,Sadachbia:A,Kore:A,Puck:B,Leda:B,Laomedeia:B').split(',').map((x) => x.split(':'));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+for (const [v, sk] of PICK) {
+  const style = STYLES[sk];
+  {
+    if (n) await wait(21000);
     n++;
     const tag = `${String(n).padStart(2, '0')}_${v}_${sk}`;
     const tmp = join(OUT, `_${tag}`);
     try {
       VOICE.name = v; VOICE.style = style;
-      const { lines } = await speak({ key, lines: LINES, outDir: tmp });
+      const { lines } = await speak({ key, lines: [LINES.join(' ')], outDir: tmp });
       const ins = lines.flatMap((l) => ['-i', l.wav]);
       const f = `${lines.map((_, i) => `[${i}:a]aresample=24000,apad=pad_dur=0.45[a${i}]`).join(';')};${lines.map((_, i) => `[a${i}]`).join('')}concat=n=${lines.length}:v=0:a=1[o]`;
       ff([...ins, '-filter_complex', f, '-map', '[o]', '-ac', '1', '-b:a', '96k', join(OUT, `${tag}.mp3`)]);
@@ -36,7 +41,7 @@ for (const v of VOICES) {
         list.push({ file: `${tag}_high.mp3`, voice: v, style: sk, pitch: 2 });
       }
       console.log('완료', tag);
-    } catch (e) { console.log('실패', tag, String(e.message).slice(0, 200)); }
+    } catch (e) { console.log('실패', tag, String(e.message).slice(0, 400)); }
     rmSync(tmp, { recursive: true, force: true });
   }
 }

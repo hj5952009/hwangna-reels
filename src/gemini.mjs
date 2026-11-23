@@ -13,7 +13,8 @@ export const MODELS = {
 };
 export const VOICE = {
   name: process.env.GEMINI_VOICE || 'Kore',
-  style: '밝고 또렷한 대학생 해설자처럼 친근한 해요체로 조금 빠르게 읽어 주세요: ',
+  // 3.8 TTS는 text를 그대로 읽으므로 말투는 speech_metadata.style로만 보낸다 (지시문을 앞에 붙이면 소리 내어 읽음)
+  style: 'bright, clear and friendly Korean university-student narrator, polite casual tone, slightly fast',
 };
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHECK_MIN = 240; // 근거 확인 뒤에는 줄이 빠질 수 있어 하한을 낮춤
@@ -227,18 +228,22 @@ export async function speak({ key, lines, outDir, sleep = realSleep }) {
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
-    const res = await call(key, `${BASE}/v1beta/models/${MODELS.tts}:generateContent`, {
+    const item = { type: 'text', text: toSpeech(text) };
+    if (VOICE.style) item.annotations = [{ type: 'speech_metadata', style: VOICE.style }];
+    const res = await call(key, `${BASE}/v1beta/interactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: VOICE.style + toSpeech(text) }] }],
-        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE.name } } } },
+        model: MODELS.tts,
+        input: [{ type: 'user_input', content: [item] }],
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: [{ voice: VOICE.name }] },
       }),
     }, { sleep, retries: 3 });
     const j = await res.json();
-    const part = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).find((p) => p.inlineData);
-    if (!part) throw new Error(`목소리를 받지 못했어요 (줄 ${i + 1})`);
-    const { pcm, rate } = toPcm(Buffer.from(part.inlineData.data, 'base64'), part.inlineData.mimeType);
+    const audio = (j.steps || []).flatMap((st) => st.content || []).filter((c) => c.type === 'audio' && c.data).pop();
+    if (!audio) throw new Error(`목소리를 받지 못했어요 (줄 ${i + 1})`);
+    const { pcm, rate } = toPcm(Buffer.from(audio.data, 'base64'), audio.mime_type);
     const wav = join(outDir, `line${i}.wav`);
     writeFileSync(wav, Buffer.concat([wavHeader(pcm.length, rate), pcm]));
     out.push({ text, wav, sec: pcm.length / 2 / rate, rms: rmsOf(pcm, rate) });
