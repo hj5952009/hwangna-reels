@@ -118,3 +118,11 @@ test('문구는 고지로 끝나고, 이미 있으면 두 번 붙이지 않음',
   assert.equal(once.split(DISCLAIMER).length - 1, 1);
   assert.match(DISCLAIMER, /투자 권유가 아니에요/);
 });
+
+test('가짜(fake) 모드는 자료가 없어도 시험 대본으로 끝까지 만든다 (Actions 흐름 시험)', async () => {
+  const c = fakeClient({ econ: { pdf: [], audio: [] }, fin: { pdf: [], audio: [] }, photo: [] });
+  const { deps } = fakeDeps();
+  await make({ wid: 'w-2000-01-01', slots: ['econ', 'fin'], client: c, key: '', fake: true, deps });
+  assert.equal(last(c.states, 'econ').state, 'ready');
+  assert.equal(last(c.states, 'fin').state, 'ready');
+});

@@ -17,7 +17,7 @@ export function fakeDeps(real) {
       if (meta.slot === 'fin') s.summary += ' 투자 권유가 아니에요.';
       // 사진이 없으면 photo 장면을 키워드로
       s.beats = s.beats.map((b) => (b.show.type === 'photo' && !meta.photos ? { ...b, show: { type: 'keyword', text: b.show.text } } : b));
-      return { ...s, slot: meta.slot, week: meta.week, presenter: meta.presenter || '시험', title: meta.title || s.title };
+      return { ...s, slot: meta.slot, week: meta.week || s.week, presenter: meta.presenter || '시험', title: meta.title || s.title };
     },
     checkScript: async ({ script }) => ({ ...script, check: { removed: [], ok: true, fake: true } }),
     speak: async ({ lines, outDir }) => {

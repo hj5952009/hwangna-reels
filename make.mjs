@@ -34,16 +34,16 @@ async function fetchAll(client, wid, slot, kind, list) {
   return Buffer.concat(parts);
 }
 
-async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, variant, work }) {
+async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, variant, work, fake }) {
   const step = (s) => { log(slot, s); return client.state(wid, slot, { state: 'making', step: s }); };
   const metaSlot = (bundle.meta && bundle.meta[slot]) || {};
   const files = (bundle.files && bundle.files[slot]) || {};
   const photoList = (bundle.files && bundle.files.photo) || [];
-  const meta = { slot, week: bundle.meta.week, presenter: metaSlot.presenter || '', title: metaSlot.title || '', photos: photoList.length };
+  const meta = { slot, week: (bundle.meta && bundle.meta.week) || '', presenter: metaSlot.presenter || '', title: metaSlot.title || '', photos: photoList.length };
   const dir = join(work, slot); mkdirSync(dir, { recursive: true });
 
   const hasPdf = (files.pdf || []).length > 0; const hasAudio = (files.audio || []).length > 0;
-  if (!rerender && !hasPdf && !hasAudio) throw new Error('자료 없음: 이 칸에 PDF도 녹음도 없어요');
+  if (!rerender && !hasPdf && !hasAudio && !fake) throw new Error('자료 없음: 이 칸에 PDF도 녹음도 없어요');
 
   await step('자료 받기');
   let pdfPath = null;
@@ -93,7 +93,7 @@ export async function make({ wid, slots, rerender = null, client, key, fake = fa
   try {
     for (const slot of slots) {
       try {
-        await makeSlot({ wid, slot, bundle, rerender: rerender && rerender[slot], client, key, deps: d, variant, work });
+        await makeSlot({ wid, slot, bundle, rerender: rerender && rerender[slot], client, key, deps: d, variant, work, fake });
         result[slot] = 'ready';
       } catch (e) {
         const error = String((e && e.message) || e).split(key || '\u0000').join('***').slice(0, 300);
