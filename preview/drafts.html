@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>캐릭터 시안</title>
+<style>
+@font-face { font-family: 'Black Han Sans'; src: url('../fonts/BlackHanSans-Regular.ttf'); }
+@font-face { font-family: 'Noto Sans KR'; src: url('../fonts/NotoSansKR-VF.ttf'); font-weight: 100 900; }
+body { margin: 0; background: #222; }
+canvas { display: block; }
+</style></head>
+<body><canvas id="c" width="1080" height="1080"></canvas>
+<script type="module">
+import { drawCharacter, VARIANTS } from '../src/character.js';
+import { BRAND, FONTS } from '../src/brand.js';
+const cv = document.getElementById('c');
+const x = cv.getContext('2d');
+// 시안 한 장: 왼쪽 큰 기본 자세 + 오른쪽 표정 3가지 작게
+window.drawDraft = (variant, t = 0, anim = false) => {
+  const W = cv.width = 1080, H = cv.height = 1080;
+  x.setTransform(1, 0, 0, 1, 0, 0);
+  x.fillStyle = BRAND.soft; x.fillRect(0, 0, W, H);
+  x.fillStyle = BRAND.yellow; x.fillRect(0, 0, W, 18); x.fillRect(0, H - 18, W, 18);
+  x.fillStyle = BRAND.brown; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  x.font = `400 76px ${FONTS.title}`; x.fillText(`시안 ${variant} · ${VARIANTS[variant].name}`, 64, 128);
+  x.font = `500 30px ${FONTS.body}`; x.fillStyle = BRAND.ink;
+  x.fillText(VARIANTS[variant].desc, 64, 182);
+  if (anim) {
+    // 2초 움직임: 말하기(입) → 눈 깜빡 → 가리키기 → 표정 순환
+    const moods = ['explain', 'surprise', 'stress', 'smile'];
+    const mood = moods[Math.floor(t / 0.5) % 4];
+    const mouth = Math.abs(Math.sin(t * 13)) * (0.5 + 0.5 * Math.abs(Math.sin(t * 3)));
+    const blink = Math.max(0, 1 - Math.abs(t - 1.2) * 12);
+    drawCharacter(x, { variant, x: 540, y: 640, scale: 1.45, mouth, blink, mood, point: t > 1 ? 1 : 0, needle: t > 1 ? 'fin' : 'econ', t });
+    x.fillStyle = BRAND.brown; x.font = `700 34px ${FONTS.body}`; x.textAlign = 'center';
+    x.fillText(`표정: ${{ explain: '설명', surprise: '놀람', stress: '강조', smile: '웃음' }[mood]}`, 540, 1010);
+    return;
+  }
+  drawCharacter(x, { variant, x: 330, y: 600, scale: 1.3, mouth: 0.45, mood: 'explain', point: 1, needle: 'econ', t: 0.3 });
+  const minis = [['surprise', 'fin', '놀람'], ['stress', 'econ', '강조'], ['smile', 'fin', '웃음']];
+  minis.forEach(([mood, needle, label], i) => {
+    const cy = 330 + i * 250;
+    drawCharacter(x, { variant, x: 850, y: cy, scale: 0.55, mouth: mood === 'smile' ? 0 : 0.3, mood, needle, t: 0.2 });
+    x.fillStyle = BRAND.brown; x.font = `700 28px ${FONTS.body}`; x.textAlign = 'center'; x.fillText(label, 850, cy + 110);
+  });
+  x.fillStyle = BRAND.brown; x.font = `500 26px ${FONTS.body}`; x.textAlign = 'left';
+  x.fillText('바늘 끝 색: 빨강 = 경제 · 옥색 = 금융', 64, 1030);
+};
+await Promise.all([`400 80px "Black Han Sans"`, `700 40px "Noto Sans KR"`, `500 40px "Noto Sans KR"`].map((f) => document.fonts.load(f, '가나다시안경제금융')));
+window.ready = true;
+</script></body></html>

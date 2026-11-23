@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>reel render</title>
+<style>
+@font-face { font-family: 'Black Han Sans'; src: url('fonts/BlackHanSans-Regular.ttf'); }
+@font-face { font-family: 'Noto Sans KR'; src: url('fonts/NotoSansKR-VF.ttf'); font-weight: 100 900; }
+body { margin: 0; } canvas { display: block; }
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script type="module">
+import { drawFrame } from './src/scene.js';
+const cv = document.getElementById('c'); const x = cv.getContext('2d');
+const load = (src) => new Promise((r) => { if (!src) { r(null); return; } const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; });
+let S = null;
+// data = { script, track, photos:[url], slides:[url], variant }
+window.setup = async (data) => {
+  const [emblem, photos, slides] = await Promise.all([load('src/emblem.png'), Promise.all((data.photos || []).map(load)), Promise.all((data.slides || []).map(load))]);
+  const text = JSON.stringify(data.script) + data.track.lines.map((l) => l.text).join('') + '황금나침반위클리발표한줄정리이번주AI목소리0123456789%@_.';
+  await Promise.all(['400 100px "Black Han Sans"', '900 60px "Noto Sans KR"', '700 40px "Noto Sans KR"', '500 40px "Noto Sans KR"'].map((f) => document.fonts.load(f, text)));
+  await document.fonts.ready;
+  S = { script: data.script, track: data.track, assets: { emblem, photos, slides, variant: data.variant } };
+  return { photos: photos.filter(Boolean).length, slides: slides.filter(Boolean).length };
+};
+// 여러 프레임을 한 번에 그려 JPEG로 돌려줌 (왕복 줄이기)
+window.frames = (ts, q = 0.92) => ts.map((t) => { drawFrame(x, S.script, S.track, t, S.assets); return cv.toDataURL('image/jpeg', q); });
+window.ready = true;
+</script></body></html>
