@@ -42,7 +42,7 @@ export const SAFE = { top: 220, bottom: 420, side: 72 };
 
 export const HANDLE = '@jbnu_goldencompass';
 
-// 해설 캐릭터 '나침이' (이름 확정 26.11.23 · 그림은 회장이 고르기 전까지 A 임시)
+// 해설 캐릭터 A '나침이' — 회장 확정 26.11.23
 export const CHARACTER = { variant: 'A', name: '나침이' };
 
 // 화면 배치 (세로 위치, px)
