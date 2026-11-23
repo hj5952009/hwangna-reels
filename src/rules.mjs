@@ -24,7 +24,13 @@ export const spokenLength = (s) => spoken(s).reduce((a, x) => a + x.length, 0);
 // 끝장 문구 (코드가 붙임 — Gemini가 만들지 않음)
 export const outroLine = (s) => `황금나침반 ${s.week} 위클리 · 발표 ${s.presenter}`;
 // 끝인사 말 (목소리로 읽는 마지막 줄)
-export const outroSpeech = (s) => `황금나침반 ${s.week} 위클리, 발표는 ${s.presenter}였어요.`;
+// 이름 끝 글자에 받침이 있으면 '이었어요', 없으면(또는 한글이 아니면) '였어요'
+const hasBatchim = (name) => { const c = String(name).trim().slice(-1).charCodeAt(0) - 0xac00; return c >= 0 && c <= 11171 && c % 28 !== 0; };
+export const outroSpeech = (s) => {
+  const who = String(s.presenter || '').trim();
+  if (!who) return `황금나침반 ${s.week} 위클리였어요.`;
+  return `황금나침반 ${s.week} 위클리, 발표는 ${who}${hasBatchim(who) ? '이었어요' : '였어요'}.`;
+};
 
 export function validate(s, { minChars = LIMITS.minChars } = {}) {
   const v = [];

@@ -1,7 +1,7 @@
 // 대본 규칙·읽기 변환 시험
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validate, spokenLength, outroLine, BANNED } from '../src/rules.mjs';
+import { validate, spokenLength, outroLine, outroSpeech, BANNED } from '../src/rules.mjs';
 import { toSpeech } from '../src/readout.mjs';
 
 // 글자 수를 맞춘 정상 대본 만들기
@@ -62,4 +62,14 @@ test('toSpeech: 숫자·단위·영문 약어를 소리 나는 대로', () => {
   assert.equal(toSpeech('3명이 발표'), '세 명이 발표');
   assert.equal(toSpeech('-1.5%'), '마이너스 일 점 오 퍼센트');
   assert.equal(toSpeech('1억 2,345만 원'), '일 억 이천삼백사십오 만 원');
+});
+
+test('끝인사: 이름 받침에 맞춰 이었어요/였어요, 이름 없으면 이름 빼기', () => {
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '김명훈' }), '황금나침반 11월 4주차 위클리, 발표는 김명훈이었어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '한유정' }), '황금나침반 11월 4주차 위클리, 발표는 한유정이었어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '이현영' }), '황금나침반 11월 4주차 위클리, 발표는 이현영이었어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '윤도현' }), '황금나침반 11월 4주차 위클리, 발표는 윤도현이었어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '이나리' }), '황금나침반 11월 4주차 위클리, 발표는 이나리였어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '발표자' }), '황금나침반 11월 4주차 위클리, 발표는 발표자였어요.');
+  assert.equal(outroSpeech({ week: '11월 4주차', presenter: '' }), '황금나침반 11월 4주차 위클리였어요.');
 });
