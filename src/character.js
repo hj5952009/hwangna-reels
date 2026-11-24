@@ -1,6 +1,6 @@
 // 황금나침반 해설 캐릭터 — canvas 2D로만 그린다 (이미지 파일 없음 · 상태 없음)
 // drawCharacter(ctx, { variant, x, y, scale, mouth, blink, mood, point, needle, t })
-//   variant  'A' 나침이(둥근 나침반 몸) · 'B' 황나 선배(나침반을 든 사람) · 'C' 부엉(바늘 머리깃 부엉이)
+//   variant  'A' 나침이(경제, 둥근 나침반 몸) · 'S' 콕이(금융, 나침이 동생·안경)
 //   x, y     몸 중심 (scale 1에서 키 약 330px: 위 -200 · 아래 +130)
 //   mouth    0(닫힘)~1(크게 벌림) — 목소리 크기(rms)로 움직인다
 //   blink    0(뜸)~1(감음)
@@ -17,9 +17,6 @@ const C = {
   ink: BRAND.deep,
   cheek: 'rgba(232,120,96,0.32)',
   white: '#FFFFFF',
-  skin: '#F7D9B5',
-  hair: '#4A3622',
-  beak: '#F09A3E',
 };
 
 const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
@@ -146,70 +143,41 @@ function drawA(ctx, o) {
   mouthShape(ctx, 0, 40, 34, o.mouth, o.mood);
 }
 
-// ── B 황나 선배: 나침반을 가슴에 든 사람 (갈색 재킷·노란 넥타이)
-function drawB(ctx, o) {
-  const tip = SLOT[o.needle] ? SLOT[o.needle].needle : SLOT.econ.needle;
-  // 몸통 (재킷)
-  ctx.beginPath(); ctx.moveTo(-100, 130); ctx.quadraticCurveTo(-108, 20, -56, 6); ctx.lineTo(56, 6); ctx.quadraticCurveTo(108, 20, 100, 130); ctx.closePath();
-  ctx.fillStyle = C.edge; ctx.fill(); ctx.strokeStyle = BRAND.deep; ctx.lineWidth = 6; ctx.stroke();
-  // 셔츠·넥타이
-  ctx.beginPath(); ctx.moveTo(-30, 6); ctx.lineTo(0, 50); ctx.lineTo(30, 6); ctx.closePath(); ctx.fillStyle = C.white; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(12, 30); ctx.lineTo(4, 96); ctx.lineTo(0, 104); ctx.lineTo(-4, 96); ctx.lineTo(-12, 30); ctx.closePath(); ctx.fillStyle = C.ring; ctx.fill();
-  // 팔
-  arm(ctx, -82, 40, -1, o.point === -1, o.t, C.edge, C.skin);
-  arm(ctx, 82, 40, 1, o.point === 1, o.t, C.edge, C.skin);
-  // 가슴에 든 작은 나침반
-  circle(ctx, -40, 86, 32, C.ring, BRAND.deep, 5); circle(ctx, -40, 86, 23, C.face, BRAND.deep, 3);
-  needleShape(ctx, -40, 86, 18, 6, Math.sin(o.t * 3.1) * 0.25, tip);
-  // 머리
-  circle(ctx, 0, -84, 86, C.skin, BRAND.deep, 6);
-  // 머리카락 (앞머리)
-  ctx.beginPath(); ctx.arc(0, -96, 84, Math.PI * 1.02, Math.PI * 1.98); ctx.quadraticCurveTo(40, -120, 10, -132); ctx.quadraticCurveTo(-30, -112, -84, -100); ctx.closePath();
-  ctx.fillStyle = C.hair; ctx.fill();
-  // 머리 위 바늘 머리핀
-  needleShape(ctx, 52, -158, 30, 9, 0.5 + Math.sin(o.t * 3.1) * 0.08, tip);
-  ellipse(ctx, -50, -58, 15, 9, C.cheek); ellipse(ctx, 50, -58, 15, 9, C.cheek);
-  eyes(ctx, 30, -86, 12, o.blink, o.mood, o.point);
-  mouthShape(ctx, 0, -40, 28, o.mouth, o.mood);
+// ── S 콕이: 나침이 동생 (금융) — 회장 확정 26.11.24 시안 1
+const JADE = SLOT.fin.accent; // #2F7D6B
+function sibBody(ctx, o, ring) {
+  ellipse(ctx, -40, 112, 30, 14, C.edge); ellipse(ctx, 40, 112, 30, 14, C.edge);
+  arm(ctx, -100, 18, -1, o.point === -1, o.t, C.edge, ring);
+  arm(ctx, 100, 18, 1, o.point === 1, o.t, C.edge, ring);
 }
-
-// ── C 부엉: 바늘이 머리깃인 황금 부엉이 (배에 나침반 눈금)
-function drawC(ctx, o) {
-  const tip = SLOT[o.needle] ? SLOT[o.needle].needle : SLOT.econ.needle;
-  // 발
-  for (const s of [-1, 1]) { ctx.beginPath(); for (let k = -1; k <= 1; k++) { ctx.moveTo(s * 40, 116); ctx.lineTo(s * 40 + k * 14, 134); } ctx.strokeStyle = C.beak; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.stroke(); }
-  // 날개 (팔)
-  for (const s of [-1, 1]) {
-    const up = o.point === s;
-    ctx.save(); ctx.translate(s * 98, 0); ctx.rotate(up ? s * -1.0 + Math.sin(o.t * 6) * 0.06 : s * 0.15 + Math.sin(o.t * 2 + s) * 0.04);
-    ellipse(ctx, s * 10, up ? -40 : 30, 34, 78, C.edge, BRAND.deep, 5);
-    ctx.restore();
+function ringTicks(ctx, R) {
+  ctx.strokeStyle = C.edge; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  for (let i = 0; i < 16; i++) {
+    const a = (i * Math.PI) / 8, r1 = i % 4 === 0 ? R - 22 : R - 14, r2 = R - 7;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); ctx.stroke();
   }
-  // 머리깃 = 바늘 두 개 (V자)
-  const wob = Math.sin(o.t * 3.1) * 0.07;
-  needleShape(ctx, -56, -118, 58, 14, -0.42 + wob, tip);
-  needleShape(ctx, 56, -118, 58, 14, 0.42 - wob, tip);
-  // 몸
-  ellipse(ctx, 0, 0, 112, 130, C.ring, C.edge, 8);
-  // 배 (나침반 눈금 반원)
-  ellipse(ctx, 0, 58, 70, 62, C.face, C.edge, 4);
-  ctx.strokeStyle = BRAND.line; ctx.lineWidth = 4;
-  for (let i = 0; i < 5; i++) { const a = Math.PI * (0.15 + i * 0.175); ctx.beginPath(); ctx.moveTo(Math.cos(a) * 40, 58 + Math.sin(a) * 40); ctx.lineTo(Math.cos(a) * 54, 58 + Math.sin(a) * 54); ctx.stroke(); }
-  // 큰 눈판
-  for (const s of [-1, 1]) circle(ctx, s * 46, -42, 44, C.white, C.edge, 6);
-  eyes(ctx, 46, -40, 17, o.blink, o.mood, o.point);
-  // 부리 (입): mouth만큼 아래로 벌어짐
-  const m = clamp01(o.mouth) * 16 + (o.mood === 'surprise' ? 8 : 0);
-  ctx.beginPath(); ctx.moveTo(-16, 2); ctx.lineTo(16, 2); ctx.lineTo(0, 22); ctx.closePath(); ctx.fillStyle = C.beak; ctx.fill(); ctx.strokeStyle = C.edge; ctx.lineWidth = 4; ctx.stroke();
-  if (m > 1) { ctx.beginPath(); ctx.moveTo(-12, 6 + m * 0.4); ctx.lineTo(12, 6 + m * 0.4); ctx.lineTo(0, 20 + m); ctx.closePath(); ctx.fillStyle = '#C9702A'; ctx.fill(); ctx.stroke(); }
-  ellipse(ctx, -84, -2, 13, 8, C.cheek); ellipse(ctx, 84, -2, 13, 8, C.cheek);
+}
+function glasses(ctx, dx, y, r) {
+  for (const s of [-1, 1]) { circle(ctx, s * dx, y, r, 'rgba(255,255,255,0.18)', C.edge, 5); }
+  ctx.beginPath(); ctx.moveTo(-dx + r, y - 2); ctx.quadraticCurveTo(0, y - 10, dx - r, y - 2); ctx.strokeStyle = C.edge; ctx.lineWidth = 5; ctx.stroke();
+}
+// 옥색 테 + 동그란 안경 + 노란 바늘 (형보다 조금 작고 차분: 몸 반지름 112 대 124)
+function drawS(ctx, o) {
+  sibBody(ctx, o, JADE);
+  needleShape(ctx, 0, -110, 66, 16, Math.sin(o.t * 3.1) * 0.07, BRAND.gold);
+  circle(ctx, 0, 0, 112, JADE, C.edge, 8);
+  ringTicks(ctx, 112);
+  circle(ctx, 0, 0, 86, C.face, C.edge, 5);
+  ellipse(ctx, -54, 30, 15, 9, C.cheek); ellipse(ctx, 54, 30, 15, 9, C.cheek);
+  eyes(ctx, 32, -10, 12, o.blink, o.mood, o.point);
+  glasses(ctx, 32, -10, 25);
+  mouthShape(ctx, 0, 38, 28, o.mouth, o.mood);
 }
 
-const DRAW = { A: drawA, B: drawB, C: drawC };
+const DRAW = { A: drawA, S: drawS };
 export const VARIANTS = {
   A: { name: '나침이', desc: '둥근 나침반이 몸, 바늘이 머리 위 안테나. 가장 단순하고 엠블럼과 닮음' },
-  B: { name: '황나 선배', desc: '갈색 재킷·노란 넥타이 선배가 나침반을 들고 설명. 사람 같아 친근함' },
-  C: { name: '부엉', desc: '바늘 두 개가 머리깃인 황금 부엉이. 배에 나침반 눈금. 똑똑한 해설가 느낌' },
+  S: { name: '콕이', desc: '나침이 동생. 옥색 테·동그란 안경·노란 바늘. 핵심을 콕 짚어 정리하는 금융 해설' },
 };
 
 export function drawCharacter(ctx, opts = {}) {

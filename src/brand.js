@@ -43,7 +43,33 @@ export const SAFE = { top: 220, bottom: 420, side: 72 };
 export const HANDLE = '@jbnu_goldencompass';
 
 // 해설 캐릭터 A '나침이' — 회장 확정 26.11.23
+// (v1 scene.js용 — Task 5에서 새 drawFrame으로 바꾸면 지움)
 export const CHARACTER = { variant: 'A', name: '나침이' };
+
+// 슬롯별 해설 캐릭터 — 엔진·시험은 이것만 본다 (설계서 v2 6-1, 회장 확정 26.11.24)
+//   경제 = 형 '나침이'(시안 A) · 금융 = 동생 '콕이'(시안 1: 옥색 테 + 동그란 안경 + 노란 바늘)
+//   voice·style은 Gemini TTS 목소리·말투(style은 speech_metadata로만 보냄), pitch는 반음(0 = 그대로)
+export const CHARACTERS = {
+  econ: {
+    variant: 'A', name: '나침이', voice: 'Puck', pitch: 0,
+    style: 'cute, bouncy cartoon mascot; bright and slightly high-pitched; friendly and crisp',
+    tone: '질문으로 열고 호기심을 따라간다. "왜 그럴까요?" "그러니까…" 같은 말로 이어 간다',
+    outro: '위클리 경제였어요. 다음 주에 또 만나요!',
+  },
+  fin: {
+    variant: 'S', name: '콕이', voice: 'Iapetus', pitch: 0,
+    style: 'smart little-brother cartoon mascot with glasses; clear, tidy and composed; friendly, slightly young, crisp diction, calmly sums things up',
+    tone: '핵심부터 짚고 정리한다. "포인트는 두 가지예요" "정리하면…" 같은 말로 묶는다',
+    outro: '위클리 금융이었어요. 다음 주에 또 만나요!',
+  },
+};
+
+// v2 화면 구역 (px) — 장면 그림은 STAGE 안에만, 자막은 CAPTION_Y0 아래
+export const STAGE = { x0: 72, x1: 1008, y0: 395, y1: 1150 };
+export const CAPTION_Y0 = 1255;
+// 줄 사이 쉼(초) · 장면 겹쳐 넘기기(초) — 회장 피드백 26.11.24
+export const GAP_V2 = 0.55;
+export const XFADE = 0.45;
 
 // 화면 배치 (세로 위치, px)
 export const LAYOUT = {

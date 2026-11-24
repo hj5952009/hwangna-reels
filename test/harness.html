@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>reel test harness</title>
+<style>
+@font-face { font-family: 'Black Han Sans'; src: url('../fonts/BlackHanSans-Regular.ttf'); }
+@font-face { font-family: 'Noto Sans KR'; src: url('../fonts/NotoSansKR-VF.ttf'); font-weight: 100 900; }
+body { margin: 0; }
+</style></head>
+<body>
+<script type="module">
+// 시험용 쪽: 렌더 모듈을 window.T로 내보낸다 (node --test가 Playwright로 연다)
+import * as character from '../src/character.js';
+import * as brand from '../src/brand.js';
+window.T = { ...character, ...brand };
+const mods = ['../src/kinds.js', '../src/icons.js'];
+for (const m of mods) { try { Object.assign(window.T, await import(m)); } catch (_) { /* 아직 없음 */ } }
+await Promise.all(['400 100px "Black Han Sans"', '900 60px "Noto Sans KR"', '700 40px "Noto Sans KR"'].map((f) => document.fonts.load(f, '가나다0123456789%')));
+// 캔버스 하나에 그려 굵은 격자 평균색(20×20)을 돌려준다 — 크롬 판마다 다른 가장자리 흐림에 덜 민감
+window.sig = (w, h, fn) => {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const c = cv.getContext('2d');
+  fn(c, window.T);
+  const d = c.getImageData(0, 0, w, h).data; const G = 20; const out = [];
+  for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+    const x0 = Math.floor(gx * w / G), x1 = Math.floor((gx + 1) * w / G), y0 = Math.floor(gy * h / G), y1 = Math.floor((gy + 1) * h / G);
+    const s = [0, 0, 0, 0]; let n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const k = (y * w + x) * 4; for (let j = 0; j < 4; j++) s[j] += d[k + j]; n++; }
+    out.push(s.map((v) => Math.round(v / n)));
+  }
+  return out;
+};
+window.ready = true;
+</script></body></html>
