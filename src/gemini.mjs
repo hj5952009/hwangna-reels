@@ -1,9 +1,11 @@
-// Gemini 호출 — 대본 쓰기(writeScript) · 근거 확인(checkScript) · 목소리(speak)
+// Gemini 호출 — 장면 설계도 쓰기(writePlan) · 근거 확인(checkPlan) · 목소리(speak)
 // 키는 x-goog-api-key 머리글에만 넣는다 (주소·로그·오류 문구에 넣지 않음).
 // 발표 자료·대본 내용도 로그에 찍지 않는다 (공개 저장소 Actions 로그).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { validate, LIMITS, SHOW_TYPES, MOODS } from './rules.mjs';
+import { validate, LIMITS, SHOW_TYPES, MOODS, validatePlan, outroScene, PLAN_LIMITS, KINDS, KIND_DATA } from './rules.mjs';
+import { ICONS } from './icons.js';
+import { CHARACTERS } from './brand.js';
 import { toSpeech } from './readout.mjs';
 
 const BASE = 'https://generativelanguage.googleapis.com';
@@ -76,6 +78,7 @@ export async function uploadFile(key, path, mimeType, { sleep = realSleep } = {}
   return { fileData: { fileUri: file.uri, mimeType: file.mimeType || mimeType } };
 }
 
+// ── v1 대본 (Task 6에서 make.mjs·fake-ai를 v2로 바꾸면 지움) ──────────────
 const AUDIO_MIME = { m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', webm: 'audio/webm', flac: 'audio/flac', amr: 'audio/amr' };
 export async function uploadSources({ key, audioPath, pdfPath, sleep }) {
   const out = [];
@@ -191,6 +194,186 @@ export async function checkScript({ key, script, sources, sleep = realSleep }) {
   const v = validate(s, { minChars: CHECK_MIN });
   if (v.length) throw new Error(scrub(key, `근거 확인 뒤 대본이 규칙에 안 맞아요: ${v.join(' / ')}`));
   return s;
+}
+
+// ── v2: 장면 설계도 (설계서 6-3·6-4) ───────────────────────
+export async function uploadPdf({ key, pdfPath, sleep = realSleep }) {
+  if (!pdfPath) throw new Error('자료 없음: PDF가 없어요');
+  return [await uploadFile(key, pdfPath, 'application/pdf', { sleep })];
+}
+
+const STR = { type: 'string' };
+const NUM = { type: 'number' };
+const ICON = { type: 'string', enum: ICONS };
+const SIDE = { type: 'object', properties: { icon: ICON, label: STR, title: STR, rows: { type: 'array', items: STR } } };
+const CARD = { type: 'object', properties: { title: STR, sub: STR } };
+// 종류마다 모양이 달라 필드를 모두 열어 두고, 종류별 모양·글자 상한은 코드(validatePlan)가 강제한다
+const DATA = {
+  type: 'object',
+  properties: {
+    left: SIDE, right: SIDE, stamp: STR,
+    value: STR, unit: STR, label: STR, ratio: NUM,
+    word: STR, easy: STR,
+    a: CARD, b: CARD, c: CARD,
+    rows: { type: 'array', items: { type: 'object', properties: { label: STR, from: NUM, to: NUM, unit: STR }, required: ['label', 'from', 'to'] } },
+    items: { type: 'array', items: { anyOf: [STR, { type: 'object', properties: { icon: ICON, label: STR }, required: ['icon', 'label'] }] } },
+    style: { type: 'string', enum: ['flow', 'check'] },
+  },
+};
+const SCENE = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: KINDS.filter((k) => k !== 'outro') }, // 끝장은 코드가 붙인다
+    say: { type: 'string', description: '소리로 읽을 문장 (해요체)' },
+    text: { type: 'string', description: '자막. 핵심어 한 곳을 **강조**' },
+    mood: { type: 'string', enum: MOODS },
+    data: DATA,
+    src: { type: 'object', properties: { page: { type: 'integer' }, quote: STR }, required: ['page', 'quote'] },
+  },
+  required: ['kind', 'say', 'text', 'mood', 'data'],
+};
+const L = PLAN_LIMITS;
+export const PLAN_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: STR,
+    scenes: { type: 'array', minItems: L.minScenes - 1, maxItems: L.maxScenes - 1, items: SCENE },
+    caption: STR,
+    hashtags: { type: 'array', maxItems: L.hashtags, items: STR },
+  },
+  required: ['title', 'scenes', 'caption', 'hashtags'],
+};
+const PLAN_CHECK_SCHEMA = {
+  type: 'object',
+  properties: {
+    check: { type: 'array', items: { type: 'object', properties: { scene: { type: 'integer' }, action: { type: 'string', enum: ['kept', 'fixed', 'removed'] }, why: STR, fixed: SCENE }, required: ['scene', 'action', 'why'] } },
+  },
+  required: ['check'],
+};
+const CHECK_MIN_CHARS = 220; // 근거 확인으로 장면이 빠질 수 있어 하한을 낮춤 (약 30초)
+
+// 규칙 표(KIND_DATA)를 사람이 읽는 글로 — 프롬프트와 코드 검사가 같은 상한을 쓰게
+const shapeText = (sp) => {
+  if (sp.t === 'str') return `글자 ${sp.max}자까지${sp.opt ? '(선택)' : ''}`;
+  if (sp.t === 'num') return `숫자${sp.opt ? '(선택, 0~1)' : ''}`;
+  if (sp.t === 'icon') return '아이콘';
+  if (sp.t === 'enum') return sp.values.join('|');
+  if (sp.t === 'arr') return `[${sp.min}~${sp.max}개: ${shapeText(sp.item)}]`;
+  return `{ ${Object.entries(sp.fields).map(([k, f]) => `${k}: ${shapeText(f)}`).join(', ')} }`;
+};
+const KIND_HELP = {
+  question: '아이콘 두 개를 선으로 잇고 결과 도장(✕ 또는 ?)을 찍는 질문 장면',
+  bignum: '큰 숫자 하나 + 단위 + 이름 (ratio는 0~1 채움 막대)',
+  keyword: '핵심어 도장 + 한 줄 쉬운 풀이',
+  formula: 'A + B = C 카드',
+  compare: '두 칸 비교 (칸마다 2~3줄)',
+  bars: '전→후 막대 2~3개 (숫자만, 단위는 unit)',
+  steps: '흐름(flow) 또는 체크(check) 2~4단계',
+  icons: '아이콘 2~4개와 이름',
+};
+
+function planPrompt(meta, notes, problems) {
+  const ch = CHARACTERS[meta.slot];
+  const outroLen = ch.outro.length;
+  const lines = [
+    `너는 전북대 금융권 취업 학회 '황금나침반'의 인스타 릴스 설계자야. 첨부한 이번 주 위클리 ${SLOT_NAME[meta.slot]} 발표 PDF를 보고, 캐릭터 '${ch.name}'가 설명하는 30~60초 세로 릴스의 장면 설계도를 JSON으로 써 줘.`,
+    `발표 제목: ${meta.title || '(PDF에서 찾기)'} / 주차: ${meta.week}`,
+    `캐릭터 말투: ${ch.tone}. 해요체로, 대학교 새내기도 알아듣게 쉽게.`,
+    `즐겨 쓰는 장면(권장): ${ch.favor.join('·')}. 다른 종류도 써도 된다.`,
+    '규칙:',
+    `- 장면 ${L.minScenes - 1}~${L.maxScenes - 1}개. 끝인사 장면은 쓰지 마 (코드가 붙인다).`,
+    `- 첫 장면은 question 또는 bignum. 왜 → 그래서 순서로 이어지게.`,
+    `- 모든 장면의 say 글자 수 합이 ${L.minChars - outroLen}~${L.maxChars - outroLen}자.`,
+    '- 숫자·사실은 첨부 PDF에 있는 것만 쓴다. 숫자나 사실이 있는 장면은 src에 PDF 쪽 번호(1부터)와 PDF 원문 그대로의 짧은 인용을 넣는다.',
+    "- 사람 이름(발표자 포함)을 쓰지 말고 '발표자'라고 쓴다.",
+    '- 사라·팔라·오른다 단정 같은 투자 권유 표현, 특정 종목 추천, 겁주는 표현을 쓰지 않는다. 투자 권유 아님 고지는 쓰지 않는다 (게시할 때 붙는다).',
+    `- mood는 ${MOODS.join('|')} 중 하나. text는 자막(짧게, 핵심어 한 곳을 **강조**).`,
+    '- 장면 종류별 data 모양(다른 필드는 비워 둔다, 글자 수는 띄어쓰기 포함):',
+    ...Object.keys(KIND_HELP).map((k) => `  · ${k} — ${KIND_HELP[k]}: ${shapeText({ t: 'obj', fields: KIND_DATA[k] })}`),
+    `- 아이콘은 이 목록에서만: ${ICONS.join(', ')}`,
+    `- caption: 인스타 본문용 2~3줄 요약. hashtags: '#황금나침반' 포함 ${L.hashtags}개 이하.`,
+  ];
+  if (String(notes || '').trim()) lines.push('발표자가 붙인 대본·메모 (참고용, 숫자는 PDF로 확인):', String(notes).trim());
+  if (problems && problems.length) lines.push(`이전 설계도 문제: ${problems.join(' / ')} — 이 문제를 고쳐서 다시 써 줘.`);
+  return lines.join('\n');
+}
+const SLOT_NAME = { econ: '경제', fin: '금융' };
+
+// Gemini 결과 → 설계도 (끝장은 코드가 붙인다)
+const assemble = (raw, meta) => ({
+  slot: meta.slot,
+  week: meta.week,
+  title: String(raw.title || meta.title || ''),
+  scenes: [...(Array.isArray(raw.scenes) ? raw.scenes : []).filter((s) => s && s.kind !== 'outro'), outroScene(meta.slot)],
+  caption: raw.caption,
+  hashtags: raw.hashtags,
+});
+
+export async function writePlan({ key, sources, notes = '', meta, sleep = realSleep }) {
+  if (!sources || !sources.length) throw new Error('자료 없음: PDF가 없어요');
+  const names = meta.names || [];
+  let problems = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let raw;
+    try {
+      raw = await generateJson(key, [...sources, { text: planPrompt(meta, notes, problems) }], PLAN_SCHEMA, { sleep });
+    } catch (e) {
+      // 깨진 JSON만 다시 묻는다. 한도·서버 오류는 다시 물어도 몫만 쓴다
+      if (!(e instanceof SyntaxError)) throw new Error(scrub(key, e.message));
+      problems = ['JSON 형식이 깨졌어요'];
+      continue;
+    }
+    const plan = assemble(raw, meta);
+    const v = validatePlan(plan, { names });
+    if (!v.length) return plan;
+    problems = v;
+  }
+  throw new Error(scrub(key, `설계도를 만들지 못했어요: ${problems.join(' / ')}`));
+}
+
+// 장면마다 근거(PDF)와 맞춰 보고 고치거나 뺀다. 다시 묻지 않는다 (설계서 6-4)
+export async function checkPlan({ key, plan, sources, names = [], sleep = realSleep }) {
+  const body = plan.scenes.filter((s) => s.kind !== 'outro').map((s, i) => ({ scene: i + 1, ...s }));
+  const prompt = [
+    '아래 릴스 장면 설계도를 첨부한 발표 PDF(근거)와 장면마다 맞춰 봐 줘.',
+    '- src의 인용이 PDF에 정말 있는지, say·text·data의 숫자가 인용·PDF와 같은지 본다.',
+    '- 근거가 없거나 틀린 숫자·사실이 있으면 근거에 맞게 고치고(fixed), 고칠 수 없으면 뺀다(removed). 숫자가 없는 장면(keyword·icons·steps)으로 바꿔 남겨도 된다.',
+    "- 사람 이름이 들어 있으면 '발표자'로 고친다(fixed).",
+    '- 투자 권유로 읽히는 표현도 고친다(fixed). 문제없으면 kept.',
+    '- 첫 장면은 question 또는 bignum으로 남긴다. 고친 장면의 글자 수 상한·data 모양은 원래 장면과 같게 지킨다.',
+    '- 장면마다 check 하나: scene(번호), action(kept|fixed|removed), why(짧게), fixed(action이 fixed일 때 고친 장면 전체).',
+    `설계도: ${JSON.stringify(body)}`,
+  ].join('\n');
+  let out;
+  try {
+    out = await generateJson(key, [...sources, { text: prompt }], PLAN_CHECK_SCHEMA, { sleep, temperature: 0.2 });
+  } catch (e) {
+    throw new Error(scrub(key, `근거 확인 실패: ${e instanceof SyntaxError ? 'JSON 형식이 깨졌어요' : e.message}`));
+  }
+  const check = [];
+  const byScene = new Map();
+  for (const c of Array.isArray(out.check) ? out.check : []) {
+    if (!c || !Number.isInteger(c.scene) || c.scene < 1 || c.scene > body.length) continue;
+    let { action, why } = c;
+    if (!['kept', 'fixed', 'removed'].includes(action)) continue;
+    // 고쳤다는데 고친 장면이 없으면 확인되지 않은 것이므로 뺀다
+    if (action === 'fixed' && !(c.fixed && typeof c.fixed === 'object' && c.fixed.kind && c.fixed.kind !== 'outro')) { action = 'removed'; why = `${why || ''} (고친 장면이 없어 뺌)`.trim(); }
+    byScene.set(c.scene, { action, fixed: c.fixed });
+    check.push({ scene: c.scene, action, why: String(why || '') });
+  }
+  const scenes = [];
+  body.forEach(({ scene, ...s }) => {
+    const c = byScene.get(scene);
+    if (c && c.action === 'removed') return;
+    if (c && c.action === 'fixed') { const { scene: _n, ...f } = c.fixed; scenes.push(f); return; }
+    scenes.push(s);
+  });
+  scenes.push(outroScene(plan.slot));
+  if (scenes.length < L.minScenes) throw new Error(`PDF에서 읽을 내용이 부족해요 (근거가 있는 장면 ${scenes.length - 1}개)`);
+  const checked = { ...plan, scenes, check };
+  const v = validatePlan(checked, { names, minChars: CHECK_MIN_CHARS });
+  if (v.length) throw new Error(scrub(key, `근거 확인 뒤 설계도가 규칙에 안 맞아요: ${v.join(' / ')}`));
+  return checked;
 }
 
 // ── 목소리 ─────────────────────────────────────────────

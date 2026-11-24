@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeScript, checkScript, speak } from '../src/gemini.mjs';
+import { writeScript, checkScript, speak, writePlan, checkPlan, uploadPdf, PLAN_SCHEMA } from '../src/gemini.mjs';
+import { validatePlan, outroScene } from '../src/rules.mjs';
+import { CHARACTERS } from '../src/brand.js';
 
 const KEY = 'TEST-KEY-should-never-appear-123';
 const realFetch = globalThis.fetch;
@@ -40,6 +42,103 @@ function fakeGemini(genReplies, calls) {
   };
 }
 function pdf() { const d = mkdtempSync(join(tmpdir(), 'gm-')); const p = join(d, 'a.pdf'); writeFileSync(p, '%PDF-1.4 fake'); return p; }
+
+// ── v2: 장면 설계도 ─────────────────────────────────────
+const PLAN = JSON.parse(readFileSync(new URL('./fixtures/plan.json', import.meta.url), 'utf8'));
+const pmeta = { slot: 'econ', week: '12월 1주차', title: '금리와 환율', names: ['홍길동'] };
+// Gemini가 돌려주는 모양: 끝장(outro)·slot·week 없이
+const planReply = (edit = (p) => p) => { const { slot, week, ...p } = structuredClone(PLAN); p.scenes = p.scenes.filter((s) => s.kind !== 'outro'); return textResp(edit(p)); };
+const SRC = [{ fileData: { fileUri: 'https://gen/files/abc', mimeType: 'application/pdf' } }];
+
+test('uploadPdf: PDF를 올려 fileData 하나를 돌려줌, PDF가 없으면 자료 없음', async () => {
+  globalThis.fetch = fakeGemini([], []);
+  const src = await uploadPdf({ key: KEY, pdfPath: pdf(), sleep: nosleep });
+  assert.deepEqual(src, [{ fileData: { fileUri: 'https://gen/files/abc', mimeType: 'application/pdf' } }]);
+  await assert.rejects(uploadPdf({ key: KEY, pdfPath: null, sleep: nosleep }), /자료 없음/);
+});
+
+test('writePlan: 요청 본문에 PDF 파일·대본 글·캐릭터 말투가 들어가고, 결과 끝에 outro가 붙음', async () => {
+  const calls = [];
+  globalThis.fetch = fakeGemini([planReply()], calls);
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '메모: 환율 이야기를 쉽게', meta: pmeta, sleep: nosleep });
+  const gens = calls.filter((c) => c.url.includes(':generateContent'));
+  assert.equal(gens.length, 1);
+  const body = JSON.parse(String(gens[0].init.body));
+  const all = JSON.stringify(body);
+  assert.match(all, /"fileUri":"https:\/\/gen\/files\/abc"/);
+  assert.ok(all.includes('메모: 환율 이야기를 쉽게'));
+  assert.ok(all.includes(CHARACTERS.econ.tone.slice(0, 12)));
+  assert.ok(all.includes('발표자'));
+  for (const k of CHARACTERS.econ.favor) assert.ok(all.includes(k), k);
+  assert.deepEqual(body.generationConfig.responseJsonSchema, PLAN_SCHEMA);
+  // 끝장은 코드가 붙임
+  assert.deepEqual(p.scenes.at(-1), outroScene('econ'));
+  assert.equal(p.scenes.length, PLAN.scenes.length);
+  assert.equal(p.slot, 'econ'); assert.equal(p.week, '12월 1주차');
+  assert.deepEqual(validatePlan(p), []);
+});
+
+test('writePlan: 금융 슬롯은 콕이 말투로', async () => {
+  const calls = [];
+  globalThis.fetch = fakeGemini([planReply()], calls);
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: { ...pmeta, slot: 'fin' }, sleep: nosleep });
+  const all = String(calls.find((c) => c.url.includes(':generateContent')).init.body);
+  assert.ok(all.includes(CHARACTERS.fin.tone.slice(0, 12)));
+  assert.deepEqual(p.scenes.at(-1), outroScene('fin'));
+});
+
+test('writePlan: 규칙 위반이면 이유를 넣어 한 번 더, 두 번 다 실패면 throw', async () => {
+  const bad = planReply((p) => { p.scenes[0].data.left.label = '가나다라마바사아자'; return p; });
+  const calls = [];
+  globalThis.fetch = fakeGemini([bad, planReply()], calls);
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  const gens = calls.filter((c) => c.url.includes(':generateContent'));
+  assert.equal(gens.length, 2);
+  assert.match(String(gens[1].init.body), /label.*9자/);
+  assert.equal(p.scenes[0].data.left.label, '한국 금리');
+  // 실명이 들어간 설계도도 위반
+  const named = planReply((x) => { x.caption = '발표 홍길동'; return x; });
+  globalThis.fetch = fakeGemini([bad, named], []);
+  await assert.rejects(writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep }), /설계도를 만들지 못했어요/);
+  globalThis.fetch = fakeGemini([textResp('{깨진'), textResp('아님')], []);
+  await assert.rejects(writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep }), /설계도를 만들지 못했어요/);
+});
+
+test('checkPlan: 고친 장면은 바꾸고 뺀 장면은 빼고 check를 남김, 사람 이름도 물어봄', async () => {
+  const calls = [];
+  const fixedScene = { ...structuredClone(PLAN.scenes[1]), say: '이번 주 자료를 보면 원달러 환율이 1,400원을 넘었어요. 꽤 높은 값이에요.' };
+  globalThis.fetch = fakeGemini([textResp({ check: [
+    { scene: 2, action: 'fixed', why: '인용과 숫자를 맞춤', fixed: fixedScene },
+    { scene: 5, action: 'removed', why: 'PDF에 근거 없음' },
+    { scene: 1, action: 'kept', why: '근거 있음' },
+  ] })], calls);
+  const base = { ...structuredClone(PLAN), week: '12월 1주차' };
+  const p = await checkPlan({ key: KEY, plan: base, sources: SRC, names: ['홍길동'], sleep: nosleep });
+  assert.equal(p.scenes.length, PLAN.scenes.length - 1);
+  assert.equal(p.scenes[1].say, fixedScene.say);
+  assert.ok(!p.scenes.some((s) => s.kind === 'icons')); // 5번째(icons)가 빠짐
+  assert.deepEqual(p.scenes.at(-1), outroScene('econ'));
+  assert.deepEqual(p.check.map((c) => c.action), ['fixed', 'removed', 'kept']);
+  const all = String(calls.find((c) => c.url.includes(':generateContent')).init.body);
+  assert.match(all, /사람 이름/);
+  assert.match(all, /"fileUri"/);
+  assert.equal(p.slot, 'econ'); assert.equal(p.week, '12월 1주차');
+});
+
+test('checkPlan: removed 장면이 빠지고 6개 미만이면 "PDF에서 읽을 내용이 부족해요"', async () => {
+  globalThis.fetch = fakeGemini([textResp({ check: [2, 3, 4].map((scene) => ({ scene, action: 'removed', why: '근거 없음' })) })], []);
+  await assert.rejects(checkPlan({ key: KEY, plan: structuredClone(PLAN), sources: SRC, names: [], sleep: nosleep }), /PDF에서 읽을 내용이 부족해요/);
+});
+
+test('checkPlan: 고친 뒤 규칙 위반이면 다시 묻지 않고 실패', async () => {
+  const calls = [];
+  const fixedScene = { ...structuredClone(PLAN.scenes[2]), text: '지금 사세요' };
+  globalThis.fetch = fakeGemini([textResp({ check: [{ scene: 3, action: 'fixed', why: 'x', fixed: fixedScene }] })], calls);
+  await assert.rejects(checkPlan({ key: KEY, plan: structuredClone(PLAN), sources: SRC, names: [], sleep: nosleep }), /근거 확인 뒤/);
+  assert.equal(calls.filter((c) => c.url.includes(':generateContent')).length, 1);
+});
+
+// ── v1 대본 (Task 6에서 make.mjs를 v2로 바꾸면 지움) ──────────────
 
 test('writeScript: 규칙 위반(720자)이면 이유를 넣어 한 번 더 요청하고 두 번째 결과를 씀', async () => {
   const calls = [];
@@ -146,8 +245,9 @@ test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () =>
   const orig = { log: console.log, error: console.error, warn: console.warn, info: console.info };
   for (const k of Object.keys(orig)) console[k] = (...a) => logs.push(a.join(' '));
   try {
-    globalThis.fetch = fakeGemini([textResp('{깨진'), () => json({ error: { message: 'bad' } }, 500)], calls);
-    await writeScript({ key: KEY, pdfPath: pdf(), audioPath: null, meta, sleep: nosleep }).catch((e) => logs.push(String(e.message)));
+    globalThis.fetch = fakeGemini([textResp('{깨진'), () => json({ error: { message: `bad ${KEY}` } }, 500)], calls);
+    const sources = await uploadPdf({ key: KEY, pdfPath: pdf(), sleep: nosleep });
+    await writePlan({ key: KEY, sources, notes: '', meta: pmeta, sleep: nosleep }).catch((e) => logs.push(String(e.message)));
   } finally { Object.assign(console, orig); }
   assert.ok(calls.length > 0);
   for (const c of calls) {

@@ -54,12 +54,14 @@ export const CHARACTERS = {
     variant: 'A', name: '나침이', voice: 'Puck', pitch: 0,
     style: 'cute, bouncy cartoon mascot; bright and slightly high-pitched; friendly and crisp',
     tone: '질문으로 열고 호기심을 따라간다. "왜 그럴까요?" "그러니까…" 같은 말로 이어 간다',
+    favor: ['question', 'steps', 'icons'], // 즐겨 쓰는 장면(권장, 설계서 6-2)
     outro: '위클리 경제였어요. 다음 주에 또 만나요!',
   },
   fin: {
     variant: 'S', name: '콕이', voice: 'Iapetus', pitch: 0,
     style: 'smart little-brother cartoon mascot with glasses; clear, tidy and composed; friendly, slightly young, crisp diction, calmly sums things up',
     tone: '핵심부터 짚고 정리한다. "포인트는 두 가지예요" "정리하면…" 같은 말로 묶는다',
+    favor: ['bignum', 'compare', 'bars', 'formula'],
     outro: '위클리 금융이었어요. 다음 주에 또 만나요!',
   },
 };
