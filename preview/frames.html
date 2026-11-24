@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>스타일 프레임</title>
+<html lang="ko"><head><meta charset="utf-8"><title>장면 프레임</title>
 <style>
 @font-face { font-family: 'Black Han Sans'; src: url('../fonts/BlackHanSans-Regular.ttf'); }
 @font-face { font-family: 'Noto Sans KR'; src: url('../fonts/NotoSansKR-VF.ttf'); font-weight: 100 900; }
@@ -7,30 +7,18 @@ body { margin: 0; background: #222; } canvas { display: block; }
 </style></head>
 <body><canvas id="c" width="1080" height="1920"></canvas>
 <script type="module">
-import { drawFrame, timeline, captionChunks } from '../src/scene.js';
-import { SAFE, LAYOUT, H, W } from '../src/brand.js';
+import { drawFrame, timeline, captionProblems } from '../src/scene.js';
 const cv = document.getElementById('c'); const x = cv.getContext('2d');
 const load = (src) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; });
-const script = await (await fetch('../test/fixtures/script.json')).json();
-const lines = [script.hook, ...script.beats.map((b) => b.line), script.summary, `황금나침반 ${script.week} 위클리였어요. 다음 주에 또 만나요!`];
-const track = { lines: lines.map((text) => { const sec = Math.max(2.2, text.length / 7.5); return { text, sec, rms: Array.from({ length: Math.ceil(sec * 30) }, (_, k) => Math.abs(Math.sin(k * 0.9)) * 0.6) }; }) };
-const tl = timeline(track); track.total = tl[tl.length - 1].end;
-const assets = { emblem: await load('../src/emblem.png'), photos: [await load('sample-photo.jpg')], slides: [] };
-await Promise.all(['400 100px "Black Han Sans"', '900 60px "Noto Sans KR"', '700 40px "Noto Sans KR"', '500 40px "Noto Sans KR"'].map((f) => document.fonts.load(f, lines.join('') + script.title)));
-window.info = { tl, total: track.total };
-window.draw = (t, variant) => { drawFrame(x, script, track, t, { ...assets, variant }); };
-// 글자가 SAFE 밖으로 나가는지: 자막 조각 줄 수·폭 검사
-window.safeCheck = () => {
-  const bad = [];
-  for (const l of track.lines) for (const c of captionChunks(x, l.text)) {
-    if (c.lines.length > 2) bad.push(`3줄 이상: ${c.lines.join('/')}`);
-    for (const ln of c.lines) { x.font = '900 66px "Noto Sans KR"'; if (x.measureText(ln).width > W - SAFE.side * 2) bad.push(`폭 넘침: ${ln}`); }
-  }
-  const capBottom = LAYOUT.caption.y + LAYOUT.caption.h;
-  if (capBottom > H - SAFE.bottom) bad.push(`자막 아래끝 ${capBottom} > ${H - SAFE.bottom}`);
-  if (LAYOUT.header.y < SAFE.top) bad.push('머리 위치가 SAFE.top 위');
-  const ch = LAYOUT.char; if (ch.y + 140 * ch.scale > H - SAFE.bottom) bad.push('캐릭터 발이 아래 SAFE 침범');
-  return bad;
-};
+const planUrl = new URLSearchParams(location.search).get('plan') || '../test/fixtures/plan.json';
+const plan = await (await fetch(planUrl)).json();
+// 가짜 목소리: 대사 7.5자/초, 입은 사인파
+const track = { lines: plan.scenes.map((s) => { const sec = Math.max(2.2, s.say.length / 7.5); return { text: s.say, sec, rms: Array.from({ length: Math.ceil(sec * 30) }, (_, k) => Math.abs(Math.sin(k * 0.9)) * 0.6) }; }) };
+const tl = timeline(track);
+const assets = { emblem: await load('../src/emblem.png') };
+await Promise.all(['400 100px "Black Han Sans"', '900 60px "Noto Sans KR"', '800 40px "Noto Sans KR"', '700 40px "Noto Sans KR"'].map((f) => document.fonts.load(f, JSON.stringify(plan) + 'AI캐릭터목소리황금나침반')));
+window.info = { tl, kinds: plan.scenes.map((s) => s.kind) };
+window.draw = (t) => { drawFrame(x, plan, track, t, assets); };
+window.safeCheck = () => captionProblems(x, plan);
 window.ready = true;
 </script></body></html>
