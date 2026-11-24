@@ -1,7 +1,16 @@
-# 나침이 목소리 오디션 (손으로만 실행) — 정해진 시험 대사 두 줄만 읽는다. 결과 mp3는 3일 뒤 사라짐
+# 캐릭터 목소리 오디션 (손으로만 실행) — 시험 대사 두 줄만 읽는다(발표 자료 원문은 넣지 않음). 결과 mp3는 3일 뒤 사라짐
 name: voice-audition
 on:
   workflow_dispatch:
+    inputs:
+      pick:
+        description: '목소리:말투 후보 (예: Iapetus:C,Leda:C). 비우면 기본 9개'
+        required: false
+        default: ''
+      lines:
+        description: '시험 대사 (JSON 문자열 배열). 비우면 기본 대사'
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -18,6 +27,8 @@ jobs:
       - name: 목소리 만들기
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AUDITION_PICK: ${{ inputs.pick }}
+          AUDITION_LINES: ${{ inputs.lines }}
         run: node dev/voice-audition.mjs audition
       - uses: actions/upload-artifact@v4
         with:
