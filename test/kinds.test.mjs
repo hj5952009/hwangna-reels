@@ -14,7 +14,12 @@ const SHORT = {
   compare: { left: { title: '전', rows: ['과거', '대표자'] }, right: { title: '후', rows: ['미래', '사업자'] } },
   bignum: { value: '3.5', unit: '%', label: '기준금리' },
 };
+// 상한을 조금(1.5배까지) 넘긴 글자 — 규칙 검사가 봐주는 범위라 그리기가 줄이거나 줄을 바꿔 넘치지 않아야 함
+const stretch = (x, k) => (typeof x === 'string' && !['icon', 'style'].includes(k) ? x + [...x].slice(0, Math.ceil([...x].length * 0.5)).join('')
+  : Array.isArray(x) ? x.map((y) => stretch(y)) : x && typeof x === 'object' ? Object.fromEntries(Object.entries(x).map(([kk, v]) => [kk, stretch(v, kk)])) : x);
+const OVER = Object.fromEntries(Object.entries(LONG).filter(([k]) => k !== 'outro').map(([k, d]) => [k, stretch(d)]));
 const ALL = Object.entries(LONG).map(([kind, data]) => ({ kind, data, tag: 'long' }))
+  .concat(Object.entries(OVER).map(([kind, data]) => ({ kind, data, tag: 'over' })))
   .concat([{ kind: 'steps', data: { ...LONG.steps, style: 'check' }, tag: 'long-check' }])
   .concat(Object.entries(SHORT).map(([kind, data]) => ({ kind, data, tag: 'short' })));
 

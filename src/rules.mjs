@@ -5,6 +5,7 @@
 import { ICONS } from './icons.js';
 import { CHARACTERS } from './brand.js';
 
+export const SLACK = 1.5; // 근거 확인·다시 굽기에서 글자 상한을 봐주는 배수
 export const PLAN_LIMITS = { minScenes: 6, maxScenes: 10, minChars: 280, maxChars: 450, hashtags: 5 };
 export const KINDS = ['question', 'bignum', 'keyword', 'formula', 'compare', 'bars', 'steps', 'icons', 'outro'];
 const FIRST_KINDS = ['question', 'bignum'];
@@ -43,13 +44,14 @@ export const KIND_DATA = {
 };
 
 // 모양 하나를 검사해 위반을 out에 넣는다 (where = 'bars.rows[0].to' 같은 위치)
-function checkShape(spec, v, where, out) {
+// slack: 글자 상한 배수 (1 = 엄격, 1.5 = 조금 넘친 글자는 봐줌 — 그리기가 줄이거나 줄을 바꿔 넘치지 않음)
+function checkShape(spec, v, where, out, slack = 1) {
   const missing = v === undefined || v === null || v === '';
   if (spec.t === 'str') {
     if (missing) { if (!spec.opt) out.push(`${where}가 비었어요`); return; }
     if (typeof v !== 'string') { out.push(`${where}는 글자여야 해요`); return; }
     const n = [...v].length;
-    if (n > spec.max) out.push(`${where} ${n}자 (${spec.max}자까지)`);
+    if (n > Math.ceil(spec.max * slack)) out.push(`${where} ${n}자 (${spec.max}자까지)`);
   } else if (spec.t === 'num') {
     if (missing) { if (!spec.opt) out.push(`${where}가 비었어요`); return; }
     if (typeof v !== 'number' || !Number.isFinite(v)) out.push(`${where}는 숫자여야 해요`);
@@ -60,15 +62,15 @@ function checkShape(spec, v, where, out) {
   } else if (spec.t === 'arr') {
     if (!Array.isArray(v)) { out.push(`${where}가 목록이 아니에요`); return; }
     if (v.length < spec.min || v.length > spec.max) out.push(`${where} ${v.length}개 (${spec.min}~${spec.max}개여야 해요)`);
-    v.forEach((x, i) => checkShape(spec.item, x, `${where}[${i}]`, out));
+    v.forEach((x, i) => checkShape(spec.item, x, `${where}[${i}]`, out, slack));
   } else if (spec.t === 'obj') {
     if (!v || typeof v !== 'object') { out.push(`${where}가 비었어요`); return; }
-    for (const [k, f] of Object.entries(spec.fields)) checkShape(f, v[k], `${where}.${k}`, out);
+    for (const [k, f] of Object.entries(spec.fields)) checkShape(f, v[k], `${where}.${k}`, out, slack);
   }
 }
-export function checkData(kind, data) {
+export function checkData(kind, data, slack = 1) {
   const out = [];
-  checkShape(obj(KIND_DATA[kind] || {}), data || {}, kind, out);
+  checkShape(obj(KIND_DATA[kind] || {}), data || {}, kind, out, slack);
   return out;
 }
 
@@ -90,7 +92,19 @@ export function planNumbers(plan) {
   return out;
 }
 
-export function validatePlan(plan, { names = [], minChars = PLAN_LIMITS.minChars } = {}) {
+// 실명이 들어 있나: 전체 이름(성과 이름 사이 띄어쓰기 하나는 허용 — '이자 영향'을 '이자영'으로 읽지 않게),
+// 그리고 세 글자 이름이면 성을 뺀 이름 + 님·씨·학생 등 (흔한 낱말 '지원금'은 안 잡게)
+const HONOR = '(?:님|씨|학생|회원|선배|후배|발표자|기수)';
+const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function hasName(text, name) {
+  const n = String(name || '').replace(/\s+/g, '');
+  if (n.length < 2) return false;
+  if (new RegExp(`${esc(n[0])}\\s?${esc(n.slice(1))}`).test(text)) return true;
+  const given = n.length === 3 ? n.slice(1) : '';
+  return !!given && new RegExp(`${esc(given)}\\s*${HONOR}`).test(text);
+}
+
+export function validatePlan(plan, { names = [], minChars = PLAN_LIMITS.minChars, slack = 1 } = {}) {
   const v = [];
   if (!plan || typeof plan !== 'object') return ['설계도 형식이 아니에요'];
   if (!['econ', 'fin'].includes(plan.slot)) v.push('슬롯이 econ/fin이 아니에요');
@@ -107,7 +121,7 @@ export function validatePlan(plan, { names = [], minChars = PLAN_LIMITS.minChars
     if (!MOODS.includes(s.mood)) v.push(`${at}: 표정 '${s.mood}'는 쓸 수 없어요`);
     if (!String(s.say || '').trim()) v.push(`${at}: 대사가 비었어요`);
     if (!String(s.text || '').trim()) v.push(`${at}: 자막이 비었어요`);
-    for (const x of checkData(s.kind, s.data)) v.push(`${at}: ${x}`);
+    for (const x of checkData(s.kind, s.data, slack)) v.push(`${at}: ${x}`);
   });
   const n = sayLength(plan);
   if (n < minChars || n > L.maxChars) v.push(`길이 ${n}자 (${minChars}~${L.maxChars}자여야 해요)`);
@@ -118,7 +132,7 @@ export function validatePlan(plan, { names = [], minChars = PLAN_LIMITS.minChars
     .map((x) => String(x || '')).join('\n');
   for (const re of BANNED) { const m = all.match(re); if (m) v.push(`권유로 읽히는 표현: '${m[0]}'`); }
   // 실명: 위반 문구에 이름을 넣지 않는다 (로그·앱 화면에 남지 않게)
-  const hits = names.map((x) => String(x || '').trim()).filter((x) => x.length >= 2 && all.includes(x));
+  const hits = names.filter((x) => hasName(all, x));
   if (hits.length) v.push(`실명: 사람 이름 ${hits.length}개가 들어 있어요 ('발표자'로 바꿔 주세요)`);
   return v;
 }

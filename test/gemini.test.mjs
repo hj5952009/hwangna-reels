@@ -112,6 +112,27 @@ test('checkPlan: 고친 장면은 바꾸고 뺀 장면은 빼고 check를 남김
   assert.equal(p.slot, 'econ'); assert.equal(p.week, '12월 1주차');
 });
 
+test('writePlan: 두 번 다 글자 상한만 조금(1.5배 안) 넘으면 실패 대신 그대로 씀 (그리기가 줄여 그림)', async () => {
+  const bad = planReply((p) => { p.scenes[0].data.left.label = '가나다라마바사아자'; return p; });
+  globalThis.fetch = fakeGemini([bad, bad], []);
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes[0].data.left.label, '가나다라마바사아자');
+});
+
+test('checkPlan: 고친 장면이 data 모양을 어기면 그 장면만 빼고 계속 · 조금 넘친 글자는 받음', async () => {
+  const broken = { ...structuredClone(PLAN.scenes[2]), data: { nope: 1 } };
+  const longish = structuredClone(PLAN.scenes[1]);
+  for (const [k, v] of Object.entries(longish.data)) if (typeof v === 'string' && k !== 'icon') longish.data[k] = v + v.slice(0, 1);
+  globalThis.fetch = fakeGemini([textResp({ check: [
+    { scene: 3, action: 'fixed', why: '숫자 고침', fixed: broken },
+    { scene: 2, action: 'fixed', why: '조금 김', fixed: longish },
+  ] })], []);
+  const p = await checkPlan({ key: KEY, plan: structuredClone(PLAN), sources: SRC, names: [], sleep: nosleep });
+  assert.equal(p.scenes.length, PLAN.scenes.length - 1);
+  assert.deepEqual(p.check.map((c) => c.action), ['removed', 'fixed']);
+  assert.match(p.check[0].why, /규칙/);
+});
+
 test('checkPlan: removed 장면이 빠지고 6개 미만이면 "PDF에서 읽을 내용이 부족해요"', async () => {
   globalThis.fetch = fakeGemini([textResp({ check: [2, 3, 4].map((scene) => ({ scene, action: 'removed', why: '근거 없음' })) })], []);
   await assert.rejects(checkPlan({ key: KEY, plan: structuredClone(PLAN), sources: SRC, names: [], sleep: nosleep }), /PDF에서 읽을 내용이 부족해요/);

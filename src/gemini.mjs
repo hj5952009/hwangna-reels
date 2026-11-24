@@ -3,7 +3,7 @@
 // 발표 자료·대본 내용도 로그에 찍지 않는다 (공개 저장소 Actions 로그).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { MOODS, validatePlan, outroScene, PLAN_LIMITS, KINDS, KIND_DATA } from './rules.mjs';
+import { MOODS, validatePlan, checkData, outroScene, PLAN_LIMITS, KINDS, KIND_DATA, SLACK } from './rules.mjs';
 import { ICONS } from './icons.js';
 import { CHARACTERS } from './brand.js';
 import { toSpeech } from './readout.mjs';
@@ -213,6 +213,8 @@ export async function writePlan({ key, sources, notes = '', meta, sleep = realSl
     const plan = assemble(raw, meta);
     const v = validatePlan(plan, { names });
     if (!v.length) return plan;
+    // 마지막 시도: 글자 상한을 조금(1.5배까지) 넘긴 것뿐이면 그대로 쓴다 (그리기가 줄여 그림)
+    if (attempt === 1 && !validatePlan(plan, { names, slack: SLACK }).length) return plan;
     problems = v;
   }
   throw new Error(scrub(key, `설계도를 만들지 못했어요: ${problems.join(' / ')}`));
@@ -245,6 +247,8 @@ export async function checkPlan({ key, plan, sources, names = [], sleep = realSl
     if (!['kept', 'fixed', 'removed'].includes(action)) continue;
     // 고쳤다는데 고친 장면이 없으면 확인되지 않은 것이므로 뺀다
     if (action === 'fixed' && !(c.fixed && typeof c.fixed === 'object' && c.fixed.kind && c.fixed.kind !== 'outro')) { action = 'removed'; why = `${why || ''} (고친 장면이 없어 뺌)`.trim(); }
+    // 고친 장면의 종류·data가 규칙에 안 맞으면 그 장면만 뺀다 (영상 전체를 실패시키지 않게)
+    else if (action === 'fixed' && (!KINDS.includes(c.fixed.kind) || checkData(c.fixed.kind, c.fixed.data, SLACK).length)) { action = 'removed'; why = `${why || ''} (고친 장면이 규칙에 안 맞아 뺌)`.trim(); }
     byScene.set(c.scene, { action, fixed: c.fixed });
     check.push({ scene: c.scene, action, why: String(why || '') });
   }
@@ -258,7 +262,7 @@ export async function checkPlan({ key, plan, sources, names = [], sleep = realSl
   scenes.push(outroScene(plan.slot));
   if (scenes.length < L.minScenes) throw new Error(`PDF에서 읽을 내용이 부족해요 (근거가 있는 장면 ${scenes.length - 1}개)`);
   const checked = { ...plan, scenes, check };
-  const v = validatePlan(checked, { names, minChars: CHECK_MIN_CHARS });
+  const v = validatePlan(checked, { names, minChars: CHECK_MIN_CHARS, slack: SLACK });
   if (v.length) throw new Error(scrub(key, `근거 확인 뒤 설계도가 규칙에 안 맞아요: ${v.join(' / ')}`));
   return checked;
 }

@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validatePlan, planNumbers } from './src/rules.mjs';
+import { validatePlan, planNumbers, SLACK } from './src/rules.mjs';
 import { CHARACTERS } from './src/brand.js';
 
 export const DISCLAIMER = '🤖 AI 목소리·캐릭터로 만든 영상이에요 · 발표 내용 요약이며 투자 권유가 아니에요';
@@ -56,13 +56,17 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, work, 
   const dir = join(work, slot); mkdirSync(dir, { recursive: true });
 
   let plan; let track; let warn = [];
+  let base; let names = meta.names; // base: 근거 확인을 거친 설계도의 숫자 (다시 굽기를 여러 번 해도 늘 이것과 비교)
   if (rerender) {
     await step('저장본 받기');
     const saved = JSON.parse((await client.getSaved(wid, slot, 'plan')).toString('utf8'));
     plan = merge(saved.plan, rerender.plan);
-    const v = validatePlan(plan, { names: meta.names, minChars: RERENDER_MIN });
+    // 자료 목록(rm)은 7일이면 지워지므로 저장본(14일)에 둔 발표자 이름도 함께 본다
+    names = [...new Set([...(Array.isArray(saved.names) ? saved.names : []), ...meta.names])];
+    const v = validatePlan(plan, { names, minChars: RERENDER_MIN, slack: SLACK });
     if (v.length) throw new Error(`고친 설계도가 규칙에 안 맞아요: ${v.join(' / ')}`);
-    const before = planNumbers(saved.plan);
+    base = Array.isArray(saved.base) ? saved.base : [...planNumbers(saved.plan)];
+    const before = new Set(base);
     const fresh = [...planNumbers(plan)].filter((n) => !before.has(n));
     if (fresh.length) warn = [`근거 없는 새 숫자: ${fresh.join(', ')}`];
     if (plan.scenes.every((s, i) => s.say === saved.plan.scenes[i].say)) {
@@ -84,6 +88,7 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, work, 
     const draft = await deps.writePlan({ key, sources, notes: String(metaSlot.notes || ''), meta });
     await step('근거 확인');
     plan = await deps.checkPlan({ key, plan: draft, sources, names: meta.names });
+    base = [...planNumbers(plan)];
     await step('목소리');
     track = await voice({ plan, slot, key, deps, dir });
   }
@@ -95,7 +100,8 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, work, 
   await step('올리기');
   // 다시 굽기용 저장본 (발표 PDF는 남기지 않음 — 설계도·줄 경계·목소리만)
   const { wav: _wav, pcm: _pcm, ...keep } = track;
-  await client.putSaved(wid, slot, 'plan', Buffer.from(JSON.stringify({ plan, track: keep })));
+  // names: 발표자 이름은 다시 굽기 실명 검사에만 쓰고, 공개 저장소·로그에는 남지 않음 (Worker KV 14일)
+  await client.putSaved(wid, slot, 'plan', Buffer.from(JSON.stringify({ plan, track: keep, base, names })));
   await client.putSaved(wid, slot, 'voice', readFileSync(track.wav));
   const video = await client.putOut(wid, slot, 'video', readFileSync(r.mp4));
   const cover = await client.putOut(wid, slot, 'cover', readFileSync(r.cover));

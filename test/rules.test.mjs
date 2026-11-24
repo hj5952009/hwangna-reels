@@ -82,6 +82,14 @@ test('글자 상한 초과(label 9자) 위반', () => {
   assert.ok(v.some((x) => x.includes('label') && x.includes('9자')), v.join(' / '));
 });
 
+test('slack 1.5: 상한을 조금 넘긴 글자(label 10자)는 봐주고, 1.5배(12자)를 넘으면 위반', () => {
+  const p = plan(); p.scenes[0].data.left.label = '가나다라마바사아자차';
+  assert.ok(has(validatePlan(p), 'label'), '기본은 엄격');
+  assert.deepEqual(validatePlan(p, { slack: 1.5 }), []);
+  p.scenes[0].data.left.label = '가'.repeat(13);
+  assert.ok(has(validatePlan(p, { slack: 1.5 }), 'label'));
+});
+
 test('말 글자 수가 범위 밖이면 위반', () => {
   const p = plan(); p.scenes[2].say += '가'.repeat(200);
   assert.ok(has(validatePlan(p), '길이'));
@@ -110,6 +118,21 @@ test('이름 막기: names에 있는 이름이 say·text·caption에 있으면 �
   assert.ok(has(validatePlan(c, { names }), '실명'));
   // 위반 문구에 이름 자체는 넣지 않는다 (로그·앱에 남지 않게)
   assert.ok(!validatePlan(c, { names }).join(' ').includes('홍길동'));
+});
+
+test('이름 막기: 성을 빼고 이름만 + 님·씨, 띄어 쓴 전체 이름도 위반 · 흔한 낱말은 통과', () => {
+  const names = ['김회준'];
+  const a = plan(); a.scenes[1].say = a.scenes[1].say.replace('이번 주', '회준 님이 짚었듯');
+  assert.ok(has(validatePlan(a, { names }), '실명'));
+  const b = plan(); b.caption = '발표 김 회준';
+  assert.ok(has(validatePlan(b, { names }), '실명'));
+  const c = plan(); c.scenes[2].text = '회준씨 정리';
+  assert.ok(has(validatePlan(c, { names }), '실명'));
+  const d = plan(); d.scenes[2].say = `지원금이 늘었어요. ${d.scenes[2].say}`;
+  assert.deepEqual(validatePlan(d, { names: ['김지원'] }), [], '지원금은 이름이 아님');
+  const e = plan(); e.scenes[2].say = `이자 영향이 커요. ${e.scenes[2].say}`;
+  assert.deepEqual(validatePlan(e, { names: ['이자영'] }), [], '낱말 사이 띄어쓰기를 붙여 이름으로 읽지 않음');
+  assert.ok(!validatePlan(a, { names }).join(' ').includes('회준'));
 });
 
 test('해시태그 6개 위반', () => {

@@ -156,6 +156,28 @@ test('다시 굽기: 대사를 고치면 speak 1번, 새 숫자면 warn', async 
   assert.match(s.warn[0], /근거 없는 새 숫자: 1\.5/);
 });
 
+test('다시 굽기를 두 번 해도 새 숫자 경고는 처음 근거 확인한 설계도와 비교', async () => {
+  const c = await madeOnce();
+  const edited = planFor('econ'); edited.scenes[2].say = '두 나라 금리 차이가 1.5%p까지 벌어졌어요. 미국 금리가 높으면 돈이 미국으로 옮겨 가요.';
+  await make({ wid: WID, slots: ['econ'], rerender: { econ: { plan: edited } }, client: c, key: 'k', deps: fakeDeps().deps });
+  const c2 = fakeClient({ econ: { pdf: [0] }, fin: { pdf: [] } }, { saved: c.saved });
+  const again = structuredClone(edited); again.scenes[1].text = '오타만 고침';
+  await make({ wid: WID, slots: ['econ'], rerender: { econ: { plan: again } }, client: c2, key: 'k', deps: fakeDeps().deps });
+  const s = last(c2.states, 'econ');
+  assert.equal(s.state, 'ready', JSON.stringify(s));
+  assert.match(String(s.warn[0] || ''), /근거 없는 새 숫자: 1\.5/);
+});
+
+test('다시 굽기: 자료 목록(rm)이 7일 지나 지워져도 저장본의 발표자 이름으로 실명을 막음', async () => {
+  const c = await madeOnce();
+  const c2 = fakeClient({ econ: { pdf: [] }, fin: { pdf: [] } }, { saved: c.saved });
+  c2.bundle = async () => ({ meta: { week: '', econ: {}, fin: {} }, files: {} });
+  const bad = planFor('econ'); bad.scenes[2].text = '김발표 님 정리';
+  await make({ wid: WID, slots: ['econ'], rerender: { econ: { plan: bad } }, client: c2, key: 'k', deps: fakeDeps().deps });
+  assert.equal(last(c2.states, 'econ').state, 'failed');
+  assert.match(last(c2.states, 'econ').error, /실명/);
+});
+
 test('다시 굽기: 고친 설계도가 규칙을 어기면 failed (목소리 안 씀)', async () => {
   const c = await madeOnce();
   const { deps, calls } = fakeDeps();
