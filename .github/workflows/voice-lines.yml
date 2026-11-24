@@ -1,0 +1,33 @@
+# 대본 전체를 나침이 목소리로 한 번에 읽기 (손으로만 실행, 시안용). 결과 wav는 3일 뒤 사라짐
+name: voice-lines
+on:
+  workflow_dispatch:
+    inputs:
+      lines:
+        description: '읽을 줄들 (JSON 문자열 배열)'
+        required: true
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund > /dev/null
+      - name: 목소리 만들기
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LINES_JSON: ${{ inputs.lines }}
+        run: node dev/voice-lines.mjs voice-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-lines
+          path: |
+            voice-out/all.wav
+            voice-out/info.json
+          retention-days: 3
