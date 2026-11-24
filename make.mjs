@@ -1,31 +1,25 @@
-// 위클리 설명 릴스 조립: 자료 받기 → 대본(Gemini) → 근거 확인 → 목소리 → 렌더 → 올리기 → 상태
+// 위클리 설명 릴스 조립 v2: 자료 받기(PDF) → 설계도 쓰기(Gemini) → 근거 확인 → 목소리(TTS 1번) → 영상 굽기 → 올리기 → 상태
 // 슬롯(경제·금융)마다 따로 돈다 — 한쪽이 실패해도 다른 쪽은 계속.
 // 로그에는 단계 이름만 찍는다 (공개 저장소 Actions 로그에 발표 내용·키가 남지 않게).
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validate, outroSpeech } from './src/rules.mjs';
+import { validatePlan, planNumbers } from './src/rules.mjs';
+import { CHARACTERS } from './src/brand.js';
 
 export const DISCLAIMER = '🤖 AI 목소리·캐릭터로 만든 영상이에요 · 발표 내용 요약이며 투자 권유가 아니에요';
 export const withDisclaimer = (caption) => `${String(caption || '').split(DISCLAIMER).join('').trim()}\n\n${DISCLAIMER}`.trim();
+const captionOf = (plan) => withDisclaimer([plan.caption, (plan.hashtags || []).join(' ')].filter((x) => String(x || '').trim()).join('\n\n'));
+const RERENDER_MIN = 220; // 사람이 고친 대사는 조금 짧아져도 받는다
 
-const run = promisify(execFile);
 const log = (slot, step) => console.log(`[${slot}] ${step}`);
-
-// PDF에서 대본이 쓰는 쪽만 PNG로 (pdftoppm 없으면 건너뜀 → 화면은 글자 카드로 대신함)
-export async function pdfPages(pdf, pages, dir) {
-  for (const p of pages) {
-    try { await run('pdftoppm', ['-png', '-r', '110', '-f', String(p), '-l', String(p), '-singlefile', pdf, join(dir, `slide${p}`)]); } catch { /* 없음 */ }
-  }
-}
 
 async function realDeps() {
   const g = await import('./src/gemini.mjs');
+  const { splitTrack } = await import('./src/split.mjs');
   const { render } = await import('./render.mjs');
-  return { uploadSources: g.uploadSources, writeScript: g.writeScript, checkScript: g.checkScript, speak: g.speak, render, pdfPages };
+  return { uploadPdf: g.uploadPdf, writePlan: g.writePlan, checkPlan: g.checkPlan, speak: g.speak, splitTrack, render };
 }
 
 async function fetchAll(client, wid, slot, kind, list, up) {
@@ -34,56 +28,81 @@ async function fetchAll(client, wid, slot, kind, list, up) {
   return Buffer.concat(parts);
 }
 
-async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, variant, work, fake }) {
+// 목소리 한 덩어리 → 줄 경계 Track
+async function voice({ plan, slot, key, deps, dir }) {
+  const lines = plan.scenes.map((s) => s.say);
+  const v = await deps.speak({ key, lines, voice: CHARACTERS[slot].voice, style: CHARACTERS[slot].style, outDir: join(dir, 'voice') });
+  return deps.splitTrack({ wav: v.wav, pcm: v.pcm, rate: v.rate, lines });
+}
+
+// 다시 굽기: 저장된 설계도에 고친 say·text·문구만 옮긴다 (장면 종류·data·근거는 저장본 그대로)
+function merge(saved, edited) {
+  const es = (edited && edited.scenes) || [];
+  if (es.length !== saved.scenes.length) throw new Error(`장면 수가 저장본과 달라요 (${es.length}개 / ${saved.scenes.length}개)`);
+  return {
+    ...saved,
+    caption: edited.caption != null ? edited.caption : saved.caption,
+    hashtags: Array.isArray(edited.hashtags) ? edited.hashtags : saved.hashtags,
+    scenes: saved.scenes.map((s, i) => ({ ...s, say: String(es[i].say ?? s.say), text: String(es[i].text ?? s.text) })),
+  };
+}
+
+async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, work, fake }) {
   const step = (s) => { log(slot, s); return client.state(wid, slot, { state: 'making', step: s }); };
   const metaSlot = (bundle.meta && bundle.meta[slot]) || {};
   const files = (bundle.files && bundle.files[slot]) || {};
-  const photoList = (bundle.files && bundle.files.photo) || [];
   const ups = (bundle.ups && bundle.ups[slot]) || {};
-  const photoUp = (bundle.ups && bundle.ups.photo) || undefined;
-  const meta = { slot, week: (bundle.meta && bundle.meta.week) || '', presenter: metaSlot.presenter || '', title: metaSlot.title || '', photos: photoList.length };
+  const meta = { slot, week: (bundle.meta && bundle.meta.week) || '', title: metaSlot.title || '', names: [metaSlot.presenter].filter(Boolean) };
   const dir = join(work, slot); mkdirSync(dir, { recursive: true });
 
-  const hasPdf = (files.pdf || []).length > 0; const hasAudio = (files.audio || []).length > 0;
-  if (!rerender && !hasPdf && !hasAudio && !fake) throw new Error('자료 없음: 이 칸에 PDF도 녹음도 없어요');
-
-  await step('자료 받기');
-  let pdfPath = null;
-  if (hasPdf) { pdfPath = join(dir, 'talk.pdf'); writeFileSync(pdfPath, await fetchAll(client, wid, slot, 'pdf', files.pdf, ups.pdf || undefined)); }
-  const assets = join(dir, 'assets'); mkdirSync(assets, { recursive: true });
-  for (const n of photoList) writeFileSync(join(assets, `photo${n}.jpg`), await client.get(wid, 'photo', 'jpg', n, photoUp));
-
-  let script;
+  let plan; let track; let warn = [];
   if (rerender) {
-    script = { ...rerender, slot, week: meta.week, presenter: meta.presenter || rerender.presenter };
-    const v = validate(script, { minChars: 240 });
-    if (v.length) throw new Error(`고친 대본이 규칙에 안 맞아요: ${v.join(' / ')}`);
+    await step('저장본 받기');
+    const saved = JSON.parse((await client.getSaved(wid, slot, 'plan')).toString('utf8'));
+    plan = merge(saved.plan, rerender.plan);
+    const v = validatePlan(plan, { names: meta.names, minChars: RERENDER_MIN });
+    if (v.length) throw new Error(`고친 설계도가 규칙에 안 맞아요: ${v.join(' / ')}`);
+    const before = planNumbers(saved.plan);
+    const fresh = [...planNumbers(plan)].filter((n) => !before.has(n));
+    if (fresh.length) warn = [`근거 없는 새 숫자: ${fresh.join(', ')}`];
+    if (plan.scenes.every((s, i) => s.say === saved.plan.scenes[i].say)) {
+      const wav = join(dir, 'voice.wav');
+      writeFileSync(wav, await client.getSaved(wid, slot, 'voice'));
+      track = { ...saved.track, wav };
+    } else {
+      await step('목소리');
+      track = await voice({ plan, slot, key, deps, dir });
+    }
   } else {
-    let audioPath = null;
-    if (hasAudio) { audioPath = join(dir, `talk.${metaSlot.audioExt || 'm4a'}`); writeFileSync(audioPath, await fetchAll(client, wid, slot, 'audio', files.audio, ups.audio || undefined)); }
-    await step('대본 쓰기');
-    const sources = await deps.uploadSources({ key, audioPath, pdfPath });
-    const draft = await deps.writeScript({ key, audioPath, pdfPath, meta, sources });
+    const pdfList = files.pdf || [];
+    if (!pdfList.length && !fake) throw new Error('PDF가 없어요: 이 칸에 발표 PDF를 올려 주세요');
+    await step('자료 받기');
+    let pdfPath = null;
+    if (pdfList.length) { pdfPath = join(dir, 'talk.pdf'); writeFileSync(pdfPath, await fetchAll(client, wid, slot, 'pdf', pdfList, ups.pdf || undefined)); }
+    await step('설계도 쓰기');
+    const sources = await deps.uploadPdf({ key, pdfPath });
+    const draft = await deps.writePlan({ key, sources, notes: String(metaSlot.notes || ''), meta });
     await step('근거 확인');
-    script = await deps.checkScript({ key, script: draft, sources });
+    plan = await deps.checkPlan({ key, plan: draft, sources, names: meta.names });
+    await step('목소리');
+    track = await voice({ plan, slot, key, deps, dir });
   }
-
-  const pages = [...new Set(script.beats.filter((b) => b.show && b.show.type === 'slide').map((b) => Number(b.show.page) || 1))];
-  if (pdfPath && pages.length) await deps.pdfPages(pdfPath, pages, assets);
-
-  await step('목소리');
-  const lines = [script.hook, ...script.beats.map((b) => b.line), script.summary, outroSpeech(script)];
-  const track = await deps.speak({ key, lines, outDir: join(dir, 'voice') });
 
   await step('영상 굽기');
   const out = join(dir, `reel-${slot}.mp4`);
-  const r = await deps.render({ script, track, assetsDir: assets, out, variant });
+  const r = await deps.render({ plan, track, out });
 
   await step('올리기');
+  // 다시 굽기용 저장본 (발표 PDF는 남기지 않음 — 설계도·줄 경계·목소리만)
+  const { wav: _wav, pcm: _pcm, ...keep } = track;
+  await client.putSaved(wid, slot, 'plan', Buffer.from(JSON.stringify({ plan, track: keep })));
+  await client.putSaved(wid, slot, 'voice', readFileSync(track.wav));
   const video = await client.putOut(wid, slot, 'video', readFileSync(r.mp4));
   const cover = await client.putOut(wid, slot, 'cover', readFileSync(r.cover));
-  const caption = withDisclaimer(script.caption);
-  await client.state(wid, slot, { state: 'ready', script, caption, video, cover, seconds: r.seconds, renderedAt: Date.now() });
+  await client.state(wid, slot, {
+    state: 'ready', plan, caption: captionOf(plan), video, cover, seconds: r.seconds,
+    character: CHARACTERS[slot].name, timing: track.timing, check: plan.check || [], warn, renderedAt: Date.now(),
+  });
   log(slot, '끝');
 }
 
@@ -99,7 +118,7 @@ export async function freshBundle(client, wid, reqAt, { sleep = (ms) => new Prom
   }
 }
 
-export async function make({ wid, slots, rerender = null, client, key, fake = false, deps = null, variant, bundle: given = null }) {
+export async function make({ wid, slots, rerender = null, client, key, fake = false, deps = null, bundle: given = null }) {
   const d = deps || (fake ? (await import('./src/fake-ai.mjs')).fakeDeps(await realDeps()) : await realDeps());
   const bundle = given || (await client.bundle(wid));
   const work = mkdtempSync(join(tmpdir(), 'reel-'));
@@ -107,7 +126,7 @@ export async function make({ wid, slots, rerender = null, client, key, fake = fa
   try {
     for (const slot of slots) {
       try {
-        await makeSlot({ wid, slot, bundle, rerender: rerender && rerender[slot], client, key, deps: d, variant, work, fake });
+        await makeSlot({ wid, slot, bundle, rerender: rerender && rerender[slot], client, key, deps: d, work, fake });
         result[slot] = 'ready';
       } catch (e) {
         const error = String((e && e.message) || e).split(key || '\u0000').join('***').slice(0, 300);
@@ -117,7 +136,7 @@ export async function make({ wid, slots, rerender = null, client, key, fake = fa
       }
     }
   } finally {
-    rmSync(work, { recursive: true, force: true }); // 발표 자료·녹음·목소리는 남기지 않음
+    rmSync(work, { recursive: true, force: true }); // 작업 폴더(발표 PDF·목소리·영상)는 남기지 않음
   }
   return result;
 }
@@ -134,8 +153,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const slots = (req.slots || ['econ', 'fin']).filter((s) => s === 'econ' || s === 'fin');
   const key = process.env.GEMINI_API_KEY || '';
   if (!fake && !key) { console.error('GEMINI_API_KEY 비밀값이 없어요'); process.exit(2); }
-  const variant = process.env.REEL_CHARACTER || undefined;
-  const r = await make({ wid, slots, rerender: req.rerender || null, client, key, fake, variant, bundle });
+  const r = await make({ wid, slots, rerender: req.rerender || null, client, key, fake, bundle });
   console.log(JSON.stringify(r));
   if (!Object.values(r).includes('ready')) process.exit(1);
 }

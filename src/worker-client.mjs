@@ -3,6 +3,7 @@
 //   GET  /reels/<wid>/bundle                         → {meta, files, request}
 //   GET  /reels/<wid>/file/<slot>/<kind>/<n>         → 조각 바이트
 //   PUT  /reels/<wid>/out/<slot>/<video|cover>?part=i&of=N → 마지막 조각 응답 {url}
+//   PUT|GET /reels/<wid>/saved/<slot>/<plan|voice>   다시 굽기용 저장본
 //   POST /reels/<wid>/state  {slot, state, ...}
 export const PART = 20 * 1024 * 1024; // KV 값 25MB 한도 아래
 
@@ -35,6 +36,11 @@ export function createClient({ url, renderKey, sleep = (ms) => new Promise((r) =
       if (!last || !last.url) throw new Error('Worker가 결과 주소를 주지 않았어요');
       return last.url;
     },
+    // 다시 굽기용 저장본 (plan = 설계도+줄 경계 JSON, voice = 목소리 wav)
+    putSaved: async (wid, slot, kind, buf) => {
+      await req(`/reels/${wid}/saved/${slot}/${kind}`, { method: 'PUT', headers: { 'Content-Type': kind === 'voice' ? 'audio/wav' : 'application/json' }, body: buf });
+    },
+    getSaved: async (wid, slot, kind) => Buffer.from(await (await req(`/reels/${wid}/saved/${slot}/${kind}`)).arrayBuffer()),
     state: async (wid, slot, st) => { await req(`/reels/${wid}/state`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot, ...st }) }); },
   };
 }

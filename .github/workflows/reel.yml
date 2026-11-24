@@ -33,8 +33,6 @@ jobs:
           cache: npm
       - name: 도구 설치
         run: |
-          sudo apt-get update -qq > /dev/null
-          sudo apt-get install -y -qq poppler-utils > /dev/null
           npm ci --no-audit --no-fund > /dev/null
           npx playwright install --with-deps chromium > /dev/null
       - name: 릴스 만들기
@@ -45,5 +43,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RENDER_KEY: ${{ secrets.RENDER_KEY }}
           WORKER_URL: ${{ vars.WORKER_URL }}
-          REEL_CHARACTER: ${{ vars.REEL_CHARACTER }}
         run: node make.mjs "$WID"

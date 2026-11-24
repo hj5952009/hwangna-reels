@@ -1,6 +1,6 @@
 // 가짜 릴스 서버 — 앱 화면(promoReels.js)을 브라우저 미리보기에서 시험할 때만 쓴다. 실제 인스타에는 아무것도 안 올린다.
 // 실행: node tools/reel-render/dev/mock-worker.mjs [포트=8787] → 앱 설정 promoApi = http://localhost:8787
-// make를 받으면 단계(차례 기다리는 중 → 대본 쓰기 → … → 올리기)를 STEP_MS마다 넘기고 ready로 바꾼다. 영상은 시험용 색 화면.
+// make를 받으면 단계(차례 기다리는 중 → 설계도 쓰기 → … → 올리기)를 STEP_MS마다 넘기고 ready로 바꾼다. 영상은 시험용 색 화면.
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -12,7 +12,7 @@ import ffmpeg from 'ffmpeg-static';
 const PORT = Number(process.argv[2] || 8787);
 const STEP_MS = Number(process.env.STEP_MS || 1500);
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = JSON.parse(readFileSync(join(HERE, '..', 'test', 'fixtures', 'script.json'), 'utf8'));
+const FIXTURE = JSON.parse(readFileSync(join(HERE, '..', 'test', 'fixtures', 'plan.json'), 'utf8'));
 const DISCLAIMER = '🤖 AI 목소리·캐릭터로 만든 영상이에요 · 발표 내용 요약이며 투자 권유가 아니에요';
 const SAMPLE = join(tmpdir(), 'hwangna-mock-reel.mp4');
 if (!existsSync(SAMPLE)) execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0xF6E7B8:s=540x960:d=4', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=4', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', SAMPLE]);
@@ -27,7 +27,8 @@ const filesOf = (m = {}) => ({
   fin: { pdf: seq((part((m.fin || {}).pdf) || {}).n), audio: seq((part((m.fin || {}).audio) || {}).n) },
   photo: seq((part(m.photo) || {}).n),
 });
-const STEPS = ['차례 기다리는 중', '자료 받기', '대본 쓰기', '근거 확인', '목소리', '영상 굽기', '올리기'];
+const STEPS = ['차례 기다리는 중', '자료 받기', '설계도 쓰기', '근거 확인', '목소리', '영상 굽기', '올리기'];
+const CHAR = { econ: '나침이', fin: '콕이' };
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' };
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { ...cors, 'Content-Type': type }); res.end(type === 'application/json' ? JSON.stringify(body) : body); };
 const body = (req) => new Promise((ok) => { const b = []; req.on('data', (c) => b.push(c)); req.on('end', () => ok(Buffer.concat(b))); });
@@ -39,9 +40,10 @@ function run(wid, slot, rerender) {
     i += 1;
     if (i < STEPS.length) { w.rs[slot] = { ...w.rs[slot], state: 'making', step: STEPS[i], at: Date.now() }; setTimeout(tick, STEP_MS); return; }
     const m = (w.meta || {})[slot] || {};
-    const script = rerender || { ...FIXTURE, slot, week: w.meta.week || FIXTURE.week, presenter: m.presenter || '시험', title: m.title || FIXTURE.title, check: { removed: ['근거 없는 숫자 문장 (가짜 서버 예시)'], ok: true } };
+    const plan = (rerender && rerender.plan) || { ...FIXTURE, slot, week: w.meta.week || FIXTURE.week, title: m.title || FIXTURE.title, check: [{ scene: 2, action: 'kept', why: '2쪽 표에 있음 (가짜 서버 예시)' }, { scene: 7, action: 'removed', why: '근거 없는 숫자 (가짜 서버 예시)' }] };
     const now = Date.now();
-    w.rs[slot] = { state: 'ready', script, caption: `${String(script.caption || '').split(DISCLAIMER).join('').trim()}\n\n${DISCLAIMER}`, video: `http://localhost:${PORT}/m/sample.mp4?${slot}${now}`, cover: '', seconds: 4, renderedAt: now, at: now };
+    const cap = [plan.caption, (plan.hashtags || []).join(' ')].filter(Boolean).join('\n\n');
+    w.rs[slot] = { state: 'ready', plan, caption: `${String(cap).split(DISCLAIMER).join('').trim()}\n\n${DISCLAIMER}`, video: `http://localhost:${PORT}/m/sample.mp4?${slot}${now}`, cover: '', seconds: 4, character: CHAR[slot], timing: 'exact', check: plan.check || [], warn: rerender ? ['근거 없는 새 숫자: 1.5 (가짜 서버 예시)'] : [], renderedAt: now, at: now };
     console.log(`[${wid}/${slot}] ready`);
   };
   setTimeout(tick, STEP_MS);

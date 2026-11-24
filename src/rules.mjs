@@ -8,6 +8,18 @@ import { CHARACTERS } from './brand.js';
 export const PLAN_LIMITS = { minScenes: 6, maxScenes: 10, minChars: 280, maxChars: 450, hashtags: 5 };
 export const KINDS = ['question', 'bignum', 'keyword', 'formula', 'compare', 'bars', 'steps', 'icons', 'outro'];
 const FIRST_KINDS = ['question', 'bignum'];
+export const MOODS = ['explain', 'surprise', 'stress', 'smile'];
+
+// 투자 권유·단정으로 읽히는 표현 (하나라도 있으면 '권유' 위반)
+export const BANNED = [
+  /(사세요|파세요|사 두세요|담으세요|팔아야|사야 해요|사야 합니다)/,
+  /(매수|매도|비중\s*확대)\s*(추천|권유|하세요|타이밍)/,
+  /(반드시|무조건|확실히|100%)\s*(오를|오른|오릅|떨어|내릴|내립|상승|하락)/,
+  /목표\s*(주가|가격)/,
+  /(수익|원금)\s*(보장|확정)/,
+  /(지금|당장)\s*(사|매수|매도|팔)/,
+  /(대박|떡상|폭등할|폭락할)/,
+];
 
 // 장면 종류별 data 모양 — str(최대 글자) · num · icon · enum · arr(개수, 항목 모양) · obj(필드), opt = 없어도 됨
 const str = (max, opt = false) => ({ t: 'str', max, opt });
@@ -108,64 +120,5 @@ export function validatePlan(plan, { names = [], minChars = PLAN_LIMITS.minChars
   // 실명: 위반 문구에 이름을 넣지 않는다 (로그·앱 화면에 남지 않게)
   const hits = names.map((x) => String(x || '').trim()).filter((x) => x.length >= 2 && all.includes(x));
   if (hits.length) v.push(`실명: 사람 이름 ${hits.length}개가 들어 있어요 ('발표자'로 바꿔 주세요)`);
-  return v;
-}
-
-// ── v1 대본 규칙 (Task 6에서 make.mjs·fake-ai를 v2로 바꾸면 지움) ──────────────
-
-export const LIMITS = { minChars: 300, maxChars: 450, minBeats: 3, maxBeats: 5 };
-export const SHOW_TYPES = ['keyword', 'number', 'compare', 'slide', 'photo'];
-export const MOODS = ['explain', 'surprise', 'stress', 'smile'];
-
-// 투자 권유·단정으로 읽히는 표현 (하나라도 있으면 '권유' 위반)
-export const BANNED = [
-  /(사세요|파세요|사 두세요|담으세요|팔아야|사야 해요|사야 합니다)/,
-  /(매수|매도|비중\s*확대)\s*(추천|권유|하세요|타이밍)/,
-  /(반드시|무조건|확실히|100%)\s*(오를|오른|오릅|떨어|내릴|내립|상승|하락)/,
-  /목표\s*(주가|가격)/,
-  /(수익|원금)\s*(보장|확정)/,
-  /(지금|당장)\s*(사|매수|매도|팔)/,
-  /(대박|떡상|폭등할|폭락할)/,
-];
-const DISCLAIMER_RE = /투자\s*권유/;
-const WEEK_RE = /^\d{1,2}월 \d주차$/;
-
-const spoken = (s) => [s.hook, ...(s.beats || []).map((b) => b.line), s.summary].map((x) => String(x || ''));
-export const spokenLength = (s) => spoken(s).reduce((a, x) => a + x.length, 0);
-
-// 끝장 문구 (코드가 붙임 — Gemini가 만들지 않음)
-export const outroLine = (s) => `황금나침반 ${s.week} 위클리 · 발표 ${s.presenter}`;
-// 끝인사 말 (목소리로 읽는 마지막 줄)
-// 이름 끝 글자에 받침이 있으면 '이었어요', 없으면(또는 한글이 아니면) '였어요'
-const hasBatchim = (name) => { const c = String(name).trim().slice(-1).charCodeAt(0) - 0xac00; return c >= 0 && c <= 11171 && c % 28 !== 0; };
-export const outroSpeech = (s) => {
-  const who = String(s.presenter || '').trim();
-  if (!who) return `황금나침반 ${s.week} 위클리였어요.`;
-  return `황금나침반 ${s.week} 위클리, 발표는 ${who}${hasBatchim(who) ? '이었어요' : '였어요'}.`;
-};
-
-export function validate(s, { minChars = LIMITS.minChars } = {}) {
-  const v = [];
-  if (!s || typeof s !== 'object') return ['대본 형식이 아니에요'];
-  if (!['econ', 'fin'].includes(s.slot)) v.push('슬롯이 econ/fin이 아니에요');
-  if (!String(s.hook || '').trim()) v.push('훅이 비었어요');
-  if (!String(s.summary || '').trim()) v.push('한 줄 정리가 비었어요');
-  const n = spokenLength(s);
-  if (n < minChars || n > LIMITS.maxChars) v.push(`길이 ${n}자 (${minChars}~${LIMITS.maxChars}자여야 해요)`);
-  const beats = Array.isArray(s.beats) ? s.beats : [];
-  if (beats.length < LIMITS.minBeats || beats.length > LIMITS.maxBeats) v.push(`장면 ${beats.length}개 (${LIMITS.minBeats}~${LIMITS.maxBeats}개여야 해요)`);
-  beats.forEach((b, i) => {
-    const t = b && b.show && b.show.type;
-    if (!SHOW_TYPES.includes(t)) v.push(`장면 ${i + 1}의 종류 '${t}'는 쓸 수 없어요`);
-    else if (t === 'number' && !String(b.show.value || '').trim()) v.push(`장면 ${i + 1}: 숫자 값이 비었어요`);
-    else if (t === 'compare' && (!b.show.a || !b.show.b)) v.push(`장면 ${i + 1}: 비교할 두 값이 필요해요`);
-    else if (t === 'keyword' && !String(b.show.text || '').trim()) v.push(`장면 ${i + 1}: 핵심어가 비었어요`);
-    if (!String((b && b.line) || '').trim()) v.push(`장면 ${i + 1}: 대사가 비었어요`);
-  });
-  const all = [...spoken(s), s.caption || '', s.title || ''].join('\n');
-  for (const re of BANNED) { const m = all.match(re); if (m) v.push(`권유로 읽히는 표현: '${m[0]}'`); }
-  if (s.slot === 'fin' && !DISCLAIMER_RE.test([s.summary, s.caption, ...spoken(s)].join('\n'))) v.push("고지: 금융 릴스에는 '투자 권유가 아니에요'가 있어야 해요");
-  if (!WEEK_RE.test(String(s.week || ''))) v.push(`끝장: 주차 '${s.week}' 형식이 '11월 4주차'가 아니에요`);
-  if (!String(s.presenter || '').trim()) v.push('끝장: 발표자 이름이 비었어요');
   return v;
 }

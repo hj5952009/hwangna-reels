@@ -65,3 +65,20 @@ test('조각 받기에 올리기 번호(up)를 붙인다', async () => {
   assert.equal(urls[0], 'https://w.example/reels/w-2026-11-24/file/econ/audio/2?up=a1aa');
   assert.equal(urls[1], 'https://w.example/reels/w-2026-11-24/file/photo/jpg/0');
 });
+
+test('putSaved·getSaved는 X-Render-Key, 주소에 키 없음', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    return init.method === 'PUT' ? Response.json({ ok: true }) : new Response(new Uint8Array([9, 8]));
+  };
+  const c = createClient({ url: 'https://w.example', renderKey: RK });
+  await c.putSaved('w-2026-11-24', 'econ', 'plan', Buffer.from('{"plan":1}'));
+  const b = await c.getSaved('w-2026-11-24', 'econ', 'voice');
+  assert.ok(Buffer.isBuffer(b)); assert.deepEqual([...b], [9, 8]);
+  assert.equal(calls[0].url, 'https://w.example/reels/w-2026-11-24/saved/econ/plan');
+  assert.equal(calls[0].init.method, 'PUT');
+  assert.equal(String(Buffer.from(calls[0].init.body)), '{"plan":1}');
+  assert.equal(calls[1].url, 'https://w.example/reels/w-2026-11-24/saved/econ/voice');
+  for (const k of calls) { assert.equal(new Headers(k.init.headers).get('x-render-key'), RK); assert.ok(!k.url.includes(RK)); }
+});

@@ -3,7 +3,7 @@
 // 발표 자료·대본 내용도 로그에 찍지 않는다 (공개 저장소 Actions 로그).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { validate, LIMITS, SHOW_TYPES, MOODS, validatePlan, outroScene, PLAN_LIMITS, KINDS, KIND_DATA } from './rules.mjs';
+import { MOODS, validatePlan, outroScene, PLAN_LIMITS, KINDS, KIND_DATA } from './rules.mjs';
 import { ICONS } from './icons.js';
 import { CHARACTERS } from './brand.js';
 import { toSpeech } from './readout.mjs';
@@ -14,7 +14,6 @@ export const MODELS = {
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
 };
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CHECK_MIN = 240; // 근거 확인 뒤에는 줄이 빠질 수 있어 하한을 낮춤
 
 // 오류 문구에서 키를 지움
 const scrub = (key, s) => (key ? String(s).split(key).join('***') : String(s));
@@ -72,68 +71,7 @@ export async function uploadFile(key, path, mimeType, { sleep = realSleep } = {}
   return { fileData: { fileUri: file.uri, mimeType: file.mimeType || mimeType } };
 }
 
-// ── v1 대본 (Task 6에서 make.mjs·fake-ai를 v2로 바꾸면 지움) ──────────────
-const AUDIO_MIME = { m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', webm: 'audio/webm', flac: 'audio/flac', amr: 'audio/amr' };
-export async function uploadSources({ key, audioPath, pdfPath, sleep }) {
-  const out = [];
-  if (pdfPath) out.push(await uploadFile(key, pdfPath, 'application/pdf', { sleep }));
-  if (audioPath) {
-    const ext = String(audioPath).split('.').pop().toLowerCase();
-    out.push(await uploadFile(key, audioPath, AUDIO_MIME[ext] || 'audio/mp4', { sleep }));
-  }
-  return out;
-}
-
-// ── 대본 형식 (구조화 출력) ───────────────────────────────
-const SHOW = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', enum: SHOW_TYPES },
-    text: { type: 'string', description: '화면에 크게 보일 짧은 말 (12자 안쪽)' },
-    value: { type: 'string', description: 'number일 때 숫자만 (예: 2.5)' },
-    unit: { type: 'string', description: 'number일 때 단위 (예: %, 원, 조 원)' },
-    a: { type: 'string' }, b: { type: 'string' },
-    page: { type: 'integer', description: 'slide일 때 PDF 쪽 번호 (1부터)' },
-    photo: { type: 'integer', description: 'photo일 때 사진 번호 (0부터)' },
-  },
-  required: ['type', 'text'],
-};
-export const SCRIPT_SCHEMA = {
-  type: 'object',
-  properties: {
-    title: { type: 'string' },
-    hook: { type: 'string' },
-    beats: { type: 'array', minItems: LIMITS.minBeats, maxItems: LIMITS.maxBeats, items: { type: 'object', properties: { line: { type: 'string' }, show: SHOW, mood: { type: 'string', enum: MOODS } }, required: ['line', 'show', 'mood'] } },
-    summary: { type: 'string' },
-    caption: { type: 'string' },
-  },
-  required: ['title', 'hook', 'beats', 'summary', 'caption'],
-};
-const CHECK_SCHEMA = {
-  ...SCRIPT_SCHEMA,
-  properties: { ...SCRIPT_SCHEMA.properties, check: { type: 'object', properties: { removed: { type: 'array', items: { type: 'string' } }, ok: { type: 'boolean' } }, required: ['removed', 'ok'] } },
-  required: [...SCRIPT_SCHEMA.required, 'check'],
-};
-
-function writePrompt(meta, problems) {
-  const slot = meta.slot === 'fin' ? '금융' : '경제';
-  const lines = [
-    `너는 전북대 금융권 취업 학회 '황금나침반'의 인스타 릴스 대본 작가야. 첨부한 이번 주 위클리 ${slot} 발표 자료(PDF·녹음)를 보고, 캐릭터가 설명하는 30~60초 세로 릴스 대본을 JSON으로 써 줘.`,
-    `발표 제목: ${meta.title || '(자료에서 찾기)'} / 주차: ${meta.week} / 발표자: ${meta.presenter}`,
-    '규칙:',
-    `- 말하는 글자(hook + 각 beat의 line + summary)를 합쳐 ${LIMITS.minChars}~${LIMITS.maxChars}자. 해요체, 대학생 새내기도 알아듣게 쉽게.`,
-    '- hook: 궁금하게 만드는 질문 한 줄. beats: 왜 → 그래서 순서로 이어지게 3~5개. summary: 한 줄 정리.',
-    '- 숫자·사실은 첨부 자료에 있는 것만 쓴다. 자료에 없는 숫자를 지어내지 않는다.',
-    "- 사라·팔라·오른다 단정 같은 투자 권유 표현을 쓰지 않는다. 특정 종목을 추천하지 않는다.",
-    meta.slot === 'fin' ? "- 금융 릴스이므로 summary 끝에 '투자 권유가 아니에요'를 꼭 넣는다." : '',
-    `- show.type은 ${SHOW_TYPES.join('·')} 중 하나. number는 value(숫자)·unit, compare는 a·b(짧게), slide는 page(1부터), photo는 photo(0~${Math.max(0, (meta.photos || 0) - 1)}).`,
-    (meta.photos || 0) > 0 ? `- 발표 현장 사진이 ${meta.photos}장 있으니 photo 장면을 하나 넣어도 좋아.` : '- 사진이 없으니 photo 장면은 쓰지 않는다.',
-    '- caption: 인스타 본문용 2~3줄 요약 + 해시태그 3개 안쪽.',
-  ].filter(Boolean);
-  if (problems && problems.length) lines.push(`이전 대본 문제: ${problems.join(' / ')} — 이 문제를 고쳐서 다시 써 줘.`);
-  return lines.join('\n');
-}
-
+// 구조화 출력(JSON) 한 번 요청 — 깨진 JSON이면 SyntaxError
 async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {}) {
   const res = await call(key, `${BASE}/v1beta/models/${MODELS.text}:generateContent`, {
     method: 'POST',
@@ -143,51 +81,6 @@ async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {
   const j = await res.json();
   const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
   return JSON.parse(text); // 깨진 JSON이면 throw
-}
-
-const withMeta = (s, meta) => ({ ...s, slot: meta.slot, week: meta.week, presenter: meta.presenter, title: s.title || meta.title || '' });
-
-export async function writeScript({ key, audioPath = null, pdfPath = null, meta, sources = null, sleep = realSleep }) {
-  if (!sources && !audioPath && !pdfPath) throw new Error('자료 없음: PDF도 녹음도 없어요');
-  const src = sources || await uploadSources({ key, audioPath, pdfPath, sleep });
-  if (!src.length) throw new Error('자료 없음: PDF도 녹음도 없어요');
-  let problems = [];
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let s;
-    try {
-      s = withMeta(await generateJson(key, [...src, { text: writePrompt(meta, problems) }], SCRIPT_SCHEMA, { sleep }), meta);
-    } catch (e) {
-      problems = [e instanceof SyntaxError ? 'JSON 형식이 깨졌어요' : scrub(key, e.message)];
-      continue;
-    }
-    const v = validate(s);
-    if (!v.length) return s;
-    problems = v;
-  }
-  throw new Error(scrub(key, `대본을 만들지 못했어요: ${problems.join(' / ')}`));
-}
-
-export async function checkScript({ key, script, sources, sleep = realSleep }) {
-  const { slot, week, presenter, check, ...body } = script;
-  const prompt = [
-    '아래 릴스 대본의 문장과 숫자를 하나씩 첨부한 발표 자료(근거)와 맞춰 봐 줘.',
-    '- 근거 자료에 없는 숫자·사실이 들어간 줄은 빼거나 근거에 맞게 고친다. 근거에 있는 내용은 그대로 둔다.',
-    '- 투자 권유로 읽히는 표현도 고친다.',
-    `- 고친 뒤에도 말하는 글자 합이 ${CHECK_MIN}~${LIMITS.maxChars}자, 장면 ${LIMITS.minBeats}~${LIMITS.maxBeats}개가 되게 한다.`,
-    slot === 'fin' ? "- summary 끝의 '투자 권유가 아니에요'는 남긴다." : '',
-    '- 같은 형식의 JSON에 check.removed(뺀·고친 원래 문장 목록)와 check.ok(근거와 맞으면 true)를 붙여 돌려줘.',
-    `대본: ${JSON.stringify(body)}`,
-  ].filter(Boolean).join('\n');
-  let out;
-  try {
-    out = await generateJson(key, [...sources, { text: prompt }], CHECK_SCHEMA, { sleep, temperature: 0.2 });
-  } catch (e) {
-    throw new Error(scrub(key, `근거 확인 실패: ${e instanceof SyntaxError ? 'JSON 형식이 깨졌어요' : e.message}`));
-  }
-  const s = withMeta(out, { slot, week, presenter, title: script.title });
-  const v = validate(s, { minChars: CHECK_MIN });
-  if (v.length) throw new Error(scrub(key, `근거 확인 뒤 대본이 규칙에 안 맞아요: ${v.join(' / ')}`));
-  return s;
 }
 
 // ── v2: 장면 설계도 (설계서 6-3·6-4) ───────────────────────
