@@ -24,8 +24,8 @@ const UP_RE = /^[a-z0-9]{4,16}$/;
 const part = (v) => (v && typeof v === 'object' && UP_RE.test(String(v.up || '')) && Number.isInteger(v.n) ? v : null);
 const seq = (n) => Array.from({ length: Math.max(0, n | 0) }, (_, i) => i);
 const filesOf = (m = {}) => ({
-  econ: { pdf: seq((part((m.econ || {}).pdf) || {}).n) },
-  fin: { pdf: seq((part((m.fin || {}).pdf) || {}).n) },
+  econ: { pdf: seq((part((m.econ || {}).pdf) || {}).n), audio: [] },
+  fin: { pdf: seq((part((m.fin || {}).pdf) || {}).n), audio: [] },
 });
 const STEPS = ['차례 기다리는 중', '자료 받기', '설계도 쓰기', '근거 확인', '목소리', '영상 굽기', '올리기'];
 const CHAR = { econ: '나침이', fin: '콕이' };
@@ -89,7 +89,7 @@ createServer(async (req, res) => {
   }
   if (req.method === 'PUT' && p.length === 5) {
     const [slot, kind, n] = p.slice(2); const up = u.searchParams.get('up') || '';
-    if (!['econ', 'fin'].includes(slot) || kind !== 'pdf') return send(res, 400, { error: '자료 칸이 이상해요 (PDF만 받아요)' });
+    if (!['econ', 'fin'].includes(slot) || kind !== 'pdf') return send(res, 400, { error: kind === 'pdf' ? '자료 칸이 이상해요' : '앱을 최신으로 업데이트해 주세요 — 이제 PDF만 받아요 (녹음·사진은 안 받아요)' });
     if (!UP_RE.test(up)) return send(res, 400, { error: '올리기 번호(up)가 없어요' });
     if (busy(slot)) return send(res, 409, BUSY);
     const buf = await body(req);
