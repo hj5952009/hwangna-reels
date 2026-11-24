@@ -128,8 +128,17 @@ test('speak: 말투 지시는 소리 내어 읽지 않게 style 칸에만 넣음
   assert.equal(item.text, '가게는 잘 되는데요'); // 지시문이 섞이지 않음
   assert.equal(item.annotations[0].type, 'speech_metadata');
   assert.ok(item.annotations[0].style.length > 0);
-  assert.equal(body.generation_config.speech_config[0].voice, 'Kore');
+  assert.equal(body.generation_config.speech_config[0].voice, 'Puck'); // 회장 선택 26.11.24: Puck · 귀여운 마스코트
+  assert.match(item.annotations[0].style, /mascot/);
   assert.equal(body.response_format.type, 'audio');
+});
+
+// 무료 등급 하루 한도를 넘기면 다시 시도해도 실패하고 한도만 더 깎이므로 바로 멈춘다
+test('speak: 하루 한도 초과(429 PerDay)면 다시 시도하지 않고 바로 알림', async () => {
+  let tries = 0;
+  globalThis.fetch = async () => { tries++; return json({ error: { code: 429, message: 'You exceeded your current quota', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }] } }, 429); };
+  await assert.rejects(speak({ key: KEY, lines: ['안녕'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep }), /하루 한도/);
+  assert.equal(tries, 1);
 });
 
 test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () => {

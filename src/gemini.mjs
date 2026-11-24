@@ -12,9 +12,10 @@ export const MODELS = {
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
 };
 export const VOICE = {
-  name: process.env.GEMINI_VOICE || 'Kore',
+  // 나침이 목소리: 회장 선택 26.11.24 (오디션 1번 Puck · 귀여운 마스코트, 높이 그대로)
+  name: process.env.GEMINI_VOICE || 'Puck',
   // 3.8 TTS는 text를 그대로 읽으므로 말투는 speech_metadata.style로만 보낸다 (지시문을 앞에 붙이면 소리 내어 읽음)
-  style: 'bright, clear and friendly Korean university-student narrator, polite casual tone, slightly fast',
+  style: 'cute, bouncy cartoon mascot; bright and slightly high-pitched; friendly and crisp',
 };
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHECK_MIN = 240; // 근거 확인 뒤에는 줄이 빠질 수 있어 하한을 낮춤
@@ -28,10 +29,15 @@ async function call(key, url, init = {}, { sleep = realSleep, retries = 3 } = {}
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, { ...init, headers });
     if (res.ok) return res;
+    let body = null;
+    try { body = await res.json(); } catch { /* 본문 없음 */ }
+    // 무료 등급 하루 한도(PerDay)는 다시 시도해도 안 되고 한도만 더 깎이므로 바로 멈춘다 (태평양 자정 = 한국 17시에 다시 참)
+    if (res.status === 429 && /PerDay/.test(JSON.stringify((body && body.error && body.error.details) || []))) {
+      throw new Error('Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)');
+    }
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt >= retries) {
-      let msg = '';
-      try { const j = await res.json(); msg = (j && j.error && j.error.message) || ''; } catch { /* 본문 없음 */ }
+      const msg = (body && body.error && body.error.message) || '';
       throw new Error(scrub(key, `Gemini ${res.status}${msg ? `: ${msg.slice(0, 200)}` : ''}`));
     }
     await sleep(Math.min(30000, 2000 * 2 ** attempt));
