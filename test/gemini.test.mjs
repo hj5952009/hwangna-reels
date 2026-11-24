@@ -180,26 +180,6 @@ function pcmB64() {
   for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / 10) * 8000 * (i < n / 2 ? 1 : 0.2)), i * 2);
   return b.toString('base64');
 }
-test('speak: 429 두 번 뒤 세 번째에 성공하면 Track을 돌려줌', async () => {
-  let tries = 0;
-  globalThis.fetch = async (url, init) => {
-    tries++;
-    if (tries <= 2) return json({ error: { code: 429, message: 'quota' } }, 429);
-    return json(ttsResp());
-  };
-  const out = mkdtempSync(join(tmpdir(), 'sp-'));
-  const t = await speak({ key: KEY, lines: ['금리 2.5%예요'], outDir: out, sleep: nosleep });
-  assert.equal(tries, 3);
-  assert.equal(t.lines.length, 1);
-  const l = t.lines[0];
-  assert.equal(l.text, '금리 2.5%예요');
-  assert.ok(Math.abs(l.sec - 1) < 0.01, `sec ${l.sec}`);
-  assert.equal(l.rms.length, 30);
-  assert.ok(Math.max(...l.rms) <= 1 && Math.max(...l.rms) > 0.9);
-  assert.ok(l.rms[5] > l.rms[25]); // 앞이 더 큼
-  assert.ok(existsSync(l.wav)); assert.equal(readFileSync(l.wav).subarray(0, 4).toString(), 'RIFF');
-});
-
 // Gemini 3.8 TTS(Interactions API) 응답: steps[].content[]의 audio (기본 WAV, RIFF 머리 있음)
 function ttsResp() {
   const pcm = Buffer.from(pcmB64(), 'base64'); const h = Buffer.alloc(44);
@@ -208,27 +188,33 @@ function ttsResp() {
   h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
   return { steps: [{ type: 'model_output', content: [{ type: 'audio', mime_type: 'audio/wav', data: Buffer.concat([h, pcm]).toString('base64') }] }] };
 }
+const fin = CHARACTERS.fin;
 
-test('speak: 목소리 요청에는 읽기 변환된 글자가 들어감', async () => {
-  const bodies = [];
-  globalThis.fetch = async (url, init) => { bodies.push(String(init.body)); return json(ttsResp()); };
-  await speak({ key: KEY, lines: ['GDP 3조 원'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
-  assert.match(bodies[0], /지디피 삼 조 원/);
+test('speak: 429 두 번 뒤 세 번째에 성공하면 wav 하나와 pcm·길이를 돌려줌', async () => {
+  let tries = 0;
+  globalThis.fetch = async () => { tries++; return tries <= 2 ? json({ error: { code: 429, message: 'quota' } }, 429) : json(ttsResp()); };
+  const out = mkdtempSync(join(tmpdir(), 'sp-'));
+  const t = await speak({ key: KEY, lines: ['금리 2.5%예요'], voice: fin.voice, style: fin.style, outDir: out, sleep: nosleep });
+  assert.equal(tries, 3);
+  assert.equal(t.rate, 24000);
+  assert.ok(Math.abs(t.total - 1) < 0.01, `total ${t.total}`);
+  assert.equal(t.pcm.length, 48000);
+  assert.ok(existsSync(t.wav)); assert.equal(readFileSync(t.wav).subarray(0, 4).toString(), 'RIFF');
 });
 
 // 3.8 TTS는 text를 그대로 읽으므로 말투 지시는 speech_metadata.style에만 (회장 확인: 지시문을 소리 내어 읽었음 26.11.24)
-test('speak: 말투 지시는 소리 내어 읽지 않게 style 칸에만 넣음', async () => {
+test('speak: 요청 1번, 본문에 <short pause>, style은 speech_metadata에만, voice는 인자', async () => {
   const reqs = [];
   globalThis.fetch = async (url, init) => { reqs.push({ url: String(url), body: JSON.parse(String(init.body)) }); return json(ttsResp()); };
-  await speak({ key: KEY, lines: ['가게는 잘 되는데요'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
+  await speak({ key: KEY, lines: ['가게는 잘 되는데요', 'GDP 3조 원', '정리하면 이래요'], voice: fin.voice, style: fin.style, outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
+  assert.equal(reqs.length, 1);
   const { url, body } = reqs[0];
   assert.match(url, /\/v1beta\/interactions$/);
   const item = body.input[0].content[0];
-  assert.equal(item.text, '가게는 잘 되는데요'); // 지시문이 섞이지 않음
+  assert.equal(item.text, '가게는 잘 되는데요 <short pause> 지디피 삼 조 원 <short pause> 정리하면 이래요'); // 읽기 변환 + 지시문 안 섞임
   assert.equal(item.annotations[0].type, 'speech_metadata');
-  assert.ok(item.annotations[0].style.length > 0);
-  assert.equal(body.generation_config.speech_config[0].voice, 'Puck'); // 회장 선택 26.11.24: Puck · 귀여운 마스코트
-  assert.match(item.annotations[0].style, /mascot/);
+  assert.equal(item.annotations[0].style, fin.style);
+  assert.equal(body.generation_config.speech_config[0].voice, 'Iapetus');
   assert.equal(body.response_format.type, 'audio');
 });
 
@@ -236,7 +222,7 @@ test('speak: 말투 지시는 소리 내어 읽지 않게 style 칸에만 넣음
 test('speak: 하루 한도 초과(429 PerDay)면 다시 시도하지 않고 바로 알림', async () => {
   let tries = 0;
   globalThis.fetch = async () => { tries++; return json({ error: { code: 429, message: 'You exceeded your current quota', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }] } }, 429); };
-  await assert.rejects(speak({ key: KEY, lines: ['안녕'], outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep }), /하루 한도/);
+  await assert.rejects(speak({ key: KEY, lines: ['안녕'], voice: fin.voice, style: fin.style, outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep }), /하루 한도/);
   assert.equal(tries, 1);
 });
 

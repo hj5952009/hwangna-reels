@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import ffmpeg from 'ffmpeg-static';
-import { speak, VOICE } from '../src/gemini.mjs';
+import { speak } from '../src/gemini.mjs';
 
 const OUT = process.argv[2] || 'audition';
 const key = process.env.GEMINI_API_KEY || '';
@@ -35,11 +35,8 @@ for (const [v, sk] of PICK) {
     const tag = `${String(n).padStart(2, '0')}_${v}_${sk}`;
     const tmp = join(OUT, `_${tag}`);
     try {
-      VOICE.name = v; VOICE.style = style;
-      const { lines } = await speak({ key, lines: [LINES.join(' ')], outDir: tmp });
-      const ins = lines.flatMap((l) => ['-i', l.wav]);
-      const f = `${lines.map((_, i) => `[${i}:a]aresample=24000,apad=pad_dur=0.45[a${i}]`).join(';')};${lines.map((_, i) => `[a${i}]`).join('')}concat=n=${lines.length}:v=0:a=1[o]`;
-      ff([...ins, '-filter_complex', f, '-map', '[o]', '-ac', '1', '-b:a', '96k', join(OUT, `${tag}.mp3`)]);
+      const { wav } = await speak({ key, lines: [LINES.join(' ')], voice: v, style, outDir: tmp });
+      ff(['-i', wav, '-af', 'aresample=24000,apad=pad_dur=0.45', '-ac', '1', '-b:a', '96k', join(OUT, `${tag}.mp3`)]);
       list.push({ file: `${tag}.mp3`, voice: v, style: sk, pitch: 0 });
       if (sk !== 'B') { // 같은 목소리를 반음 두 개 높여 (빠르기는 그대로, 요청은 더 안 씀)
         ff(['-i', join(OUT, `${tag}.mp3`), '-af', 'asetrate=24000*1.122,aresample=24000,atempo=0.891', '-b:a', '96k', join(OUT, `${tag}_high.mp3`)]);

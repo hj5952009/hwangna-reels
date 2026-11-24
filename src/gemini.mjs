@@ -13,12 +13,6 @@ export const MODELS = {
   text: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
 };
-export const VOICE = {
-  // 나침이 목소리: 회장 선택 26.11.24 (오디션 1번 Puck · 귀여운 마스코트, 높이 그대로)
-  name: process.env.GEMINI_VOICE || 'Puck',
-  // 3.8 TTS는 text를 그대로 읽으므로 말투는 speech_metadata.style로만 보낸다 (지시문을 앞에 붙이면 소리 내어 읽음)
-  style: 'cute, bouncy cartoon mascot; bright and slightly high-pitched; friendly and crisp',
-};
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHECK_MIN = 240; // 근거 확인 뒤에는 줄이 빠질 수 있어 하한을 낮춤
 
@@ -400,42 +394,28 @@ function toPcm(buf, mimeType) {
   const m = /rate=(\d+)/.exec(mimeType || '');
   return { pcm: buf, rate: m ? Number(m[1]) : 24000 };
 }
-function rmsOf(pcm, rate, fps = 30) {
-  const n = Math.floor(pcm.length / 2); const win = Math.max(1, Math.round(rate / fps));
-  const out = [];
-  for (let s = 0; s < n; s += win) {
-    let sum = 0; const e = Math.min(n, s + win);
-    for (let i = s; i < e; i++) { const v = pcm.readInt16LE(i * 2) / 32768; sum += v * v; }
-    out.push(Math.sqrt(sum / (e - s)));
-  }
-  const max = Math.max(1e-9, ...out);
-  return out.map((v) => Math.min(1, v / max));
-}
-
-export async function speak({ key, lines, outDir, sleep = realSleep }) {
+// 릴스 한 편의 대사를 요청 1번으로 읽힌다 (무료 몫: 3.8 Flash TTS 하루 10회, 설계서 6-5)
+//   줄 사이에는 <short pause>를 넣고(소리 내어 읽지 않음 26.11.24 확인), 줄 나누기는 split.mjs splitTrack이 한다.
+//   목소리·말투는 슬롯 캐릭터(CHARACTERS[slot].voice·style). 말투는 speech_metadata.style에만 넣는다.
+export async function speak({ key, lines, voice = CHARACTERS.econ.voice, style = CHARACTERS.econ.style, outDir, sleep = realSleep }) {
   mkdirSync(outDir, { recursive: true });
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    const text = lines[i];
-    const item = { type: 'text', text: toSpeech(text) };
-    if (VOICE.style) item.annotations = [{ type: 'speech_metadata', style: VOICE.style }];
-    const res = await call(key, `${BASE}/v1beta/interactions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: MODELS.tts,
-        input: [{ type: 'user_input', content: [item] }],
-        response_format: { type: 'audio' },
-        generation_config: { speech_config: [{ voice: VOICE.name }] },
-      }),
-    }, { sleep, retries: 3 });
-    const j = await res.json();
-    const audio = (j.steps || []).flatMap((st) => st.content || []).filter((c) => c.type === 'audio' && c.data).pop();
-    if (!audio) throw new Error(`목소리를 받지 못했어요 (줄 ${i + 1})`);
-    const { pcm, rate } = toPcm(Buffer.from(audio.data, 'base64'), audio.mime_type);
-    const wav = join(outDir, `line${i}.wav`);
-    writeFileSync(wav, Buffer.concat([wavHeader(pcm.length, rate), pcm]));
-    out.push({ text, wav, sec: pcm.length / 2 / rate, rms: rmsOf(pcm, rate) });
-  }
-  return { lines: out, total: out.reduce((a, l) => a + l.sec, 0) };
+  const item = { type: 'text', text: lines.map((l) => toSpeech(String(l))).join(' <short pause> ') };
+  if (style) item.annotations = [{ type: 'speech_metadata', style }];
+  const res = await call(key, `${BASE}/v1beta/interactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODELS.tts,
+      input: [{ type: 'user_input', content: [item] }],
+      response_format: { type: 'audio' },
+      generation_config: { speech_config: [{ voice }] },
+    }),
+  }, { sleep, retries: 3 });
+  const j = await res.json();
+  const audio = (j.steps || []).flatMap((st) => st.content || []).filter((c) => c.type === 'audio' && c.data).pop();
+  if (!audio) throw new Error('목소리를 받지 못했어요');
+  const { pcm, rate } = toPcm(Buffer.from(audio.data, 'base64'), audio.mime_type);
+  const wav = join(outDir, 'voice.wav');
+  writeFileSync(wav, Buffer.concat([wavHeader(pcm.length, rate), pcm]));
+  return { wav, pcm, rate, total: pcm.length / 2 / rate };
 }
