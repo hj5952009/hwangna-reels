@@ -13,13 +13,17 @@ export const MODELS = {
   text: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
   // 첫 모델이 붐비면(503 high demand 등) 차례로 넘어갈 모델 (26.11.25 실제 시험에서 3.8 Flash 503으로 두 칸 실패)
-  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-2.5-flash,gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
+  // 2.5 Flash는 새 사용자에게 안 열림(404, 26.11.25 네 번째 시험) — 없는 모델은 404로 건너뛴다
+  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-3.8-flash-lite,gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
   ttsFallback: (process.env.GEMINI_TTS_FALLBACK || 'gemini-3.8-flash-lite-tts').split(',').map((x) => x.trim()).filter(Boolean),
 };
 const BUSY_MSG = 'Gemini가 붐벼요 (모든 모델이 바빠요) — 잠시 뒤 다시 만들기를 눌러 주세요';
 const PER_DAY_MSG = 'Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)';
 // 다음 모델로 넘어가도 되는 오류: 서버 붐빔·과부하(5xx)와 한도(429) — 무료 하루 한도도 모델마다 따로라(PerProjectPerModel) 넘어간다
-const canFallback = (e) => !!e && (e.status >= 500 || e.status === 429);
+// + 그 모델을 못 씀(404) + 답이 없거나 연결이 끊김(network)
+const canFallback = (e) => !!e && (e.status >= 500 || e.status === 429 || e.status === 404 || e.network === true);
+// 요청 하나의 시간 제한 — 없으면 Node fetch가 5분(헤더 대기 기본값)을 기다린 뒤 'fetch failed' (26.11.25 경제 칸)
+const REQ_TIMEOUT_MS = Number(process.env.GEMINI_REQ_TIMEOUT_MS) || 150000;
 // 모델 목록을 차례로 써 본다 — 붐빔·한도면 다음 모델, 다른 오류(400 등)는 바로 throw
 async function withModels(models, fn) {
   const errs = [];
@@ -39,7 +43,15 @@ async function call(key, url, init = {}, { sleep = realSleep, retries = 3 } = {}
   const headers = new Headers(init.headers || {});
   headers.set('x-goog-api-key', key);
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { ...init, headers });
+    let res;
+    try {
+      res = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(REQ_TIMEOUT_MS) });
+    } catch (e) {
+      // 답이 없거나(시간 초과) 연결이 끊김 — 한 번만 다시 묻고, 그래도 안 되면 다음 모델로 (withModels)
+      if (attempt >= 1) throw Object.assign(new Error(scrub(key, `Gemini 연결 실패 (${e && e.name === 'TimeoutError' ? `${REQ_TIMEOUT_MS / 1000}초 동안 답이 없음` : (e && e.message) || '네트워크'})`)), { status: 0, network: true });
+      await sleep(5000);
+      continue;
+    }
     if (res.ok) return res;
     let body = null;
     try { body = await res.json(); } catch { /* 본문 없음 */ }

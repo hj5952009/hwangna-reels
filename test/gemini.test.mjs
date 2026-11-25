@@ -254,3 +254,30 @@ test('speak: 목소리 모델이 계속 503이면 다음 목소리 모델로 (�
   assert.ok(t.total > 0);
   assert.equal(models.at(-1), MODELS.ttsFallback[0]);
 });
+
+// 26.11.25 네 번째 실제 시험: 경제는 3.8 Flash 요청이 5분 넘게 답이 없다가 'fetch failed', 금융은 대체 모델 2.5 Flash가 404(새 사용자에겐 안 열림)
+test('MODELS: 새 사용자에게 안 열리는 gemini-2.5-flash는 대체 목록에 없음', () => {
+  assert.ok(!MODELS.textFallback.includes('gemini-2.5-flash'), MODELS.textFallback.join(','));
+  assert.ok(MODELS.textFallback.length >= 1);
+});
+test('writePlan: 대체 모델이 404(이 모델은 못 씀)면 그 다음 모델로', async () => {
+  const urls = [];
+  const gone = () => json({ error: { code: 404, message: 'This model models/x is no longer available to new users.' } }, 404);
+  globalThis.fetch = async (url) => { const u = String(url); urls.push(u); return u.includes(`/models/${MODELS.text}:`) ? gone() : json(planReply()); };
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 1);
+});
+test('writePlan: 첫 모델 요청이 네트워크 오류(fetch failed)면 한 번만 다시 묻고 다음 모델로', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => { const u = String(url); urls.push(u); if (u.includes(`/models/${MODELS.text}:`)) throw new TypeError('fetch failed'); return json(planReply()); };
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 2);
+});
+test('Gemini 요청마다 시간 제한(AbortSignal)이 걸림 — 답이 없으면 5분씩 기다리지 않게', async () => {
+  const sigs = [];
+  globalThis.fetch = async (url, init = {}) => { sigs.push(init.signal); return json(planReply()); };
+  await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.ok(sigs.length >= 1 && sigs.every((s) => s instanceof AbortSignal), '시간 제한 없음');
+});
