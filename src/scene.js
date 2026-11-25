@@ -1,7 +1,7 @@
 // 위클리 설명 릴스 한 프레임 그리기 — drawFrame(ctx, plan, track, t, assets) (설계서 v2 6-6)
 // 순수 함수: ctx(1080×1920 canvas 2D)에만 그린다. 브라우저(render.html·preview)에서 쓴다.
 // 장면 i = 설계도 scenes[i] = 목소리 줄 i. 줄 사이 GAP초 쉼(그동안 앞 장면·자막 유지).
-// 그리는 순서: 배경 → 머리띠(슬롯 칩·주차·'AI 캐릭터 · AI 목소리'·진행 막대)
+// 그리는 순서: 배경 → 머리띠(슬롯 칩·주차·'황금나침반'·진행 막대)
 //             → 앞 장면 사라짐·새 장면 등장(XFADE초) → 캐릭터(슬롯 시안, 입=소리 크기, 표정=mood, 자리 이동) → 자막 2줄
 import { W, H, BRAND, SLOT, FONTS, CHARACTERS, GAP_V2, XFADE, CAPTION_Y0 } from './brand.js';
 import { drawCharacter } from './character.js';
@@ -115,14 +115,16 @@ function pill(ctx, x, y, w, h, fill, stroke, lw = 3) {
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
 }
-// ── 머리띠: 슬롯 칩 · 주차 · AI 표시 · 진행 막대 (y 236~336, SAFE.top 220 아래)
+// 머리띠 오른쪽 표시 (AI로 만든 영상이라는 고지는 게시 문구 첫 줄에 둔다)
+export const HEADER_BADGE = '황금나침반';
+// ── 머리띠: 슬롯 칩 · 주차 · 황금나침반 표시 · 진행 막대 (y 236~336, SAFE.top 220 아래)
 function header(ctx, plan, t, total) {
   const S = SLOT[plan.slot] || SLOT.econ;
   pill(ctx, 72, 236, 236, 70, S.accent);
   drawFit(ctx, S.label, 190, 272, 200, 36, 26, 1, BODY(800), S.onAccent);
   drawFit(ctx, String(plan.week || ''), 330, 272, 410, 36, 24, 1, BODY(800), BRAND.deep, 'left');
   pill(ctx, 760, 244, 248, 54, '#FFFFFF', BRAND.line);
-  drawFit(ctx, 'AI 캐릭터 · AI 목소리', 884, 272, 224, 24, 18, 1, BODY(700), BRAND.brown);
+  drawFit(ctx, HEADER_BADGE, 884, 272, 224, 26, 18, 1, BODY(800), BRAND.brown);
   pill(ctx, 72, 326, 936, 10, BRAND.line);
   pill(ctx, 72, 326, Math.max(10, 936 * cl(total ? t / total : 0)), 10, S.accent);
 }

@@ -9,7 +9,7 @@ import ffmpeg from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import { render, joinAudio } from '../render.mjs';
 import { GAP_V2 } from '../src/brand.js';
-import { timeline } from '../src/scene.js';
+import { timeline, HEADER_BADGE } from '../src/scene.js';
 
 const ffprobe = ffprobeStatic.path;
 const probe = (f) => JSON.parse(execFileSync(ffprobe, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', f]).toString());
@@ -25,6 +25,10 @@ function fakeTrack(dir, n, sec) {
   }));
   return { wav, rate: 24000, timing: 'exact', total: n * sec, lines };
 }
+
+test('머리띠 오른쪽 표시는 황금나침반 (AI 고지는 게시 문구에)', () => {
+  assert.equal(HEADER_BADGE, '황금나침반');
+});
 
 test('timeline: 줄마다 sec, 사이 GAP', () => {
   const tl = timeline({ lines: [{ sec: 2 }, { sec: 3 }, { sec: 1 }] });
