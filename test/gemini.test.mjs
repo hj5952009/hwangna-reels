@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { speak, writePlan, checkPlan, uploadPdf, PLAN_SCHEMA } from '../src/gemini.mjs';
+import { speak, writePlan, checkPlan, uploadPdf, PLAN_SCHEMA, MODELS } from '../src/gemini.mjs';
 import { validatePlan, outroScene } from '../src/rules.mjs';
 import { CHARACTERS } from '../src/brand.js';
 
@@ -213,4 +213,34 @@ test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () =>
     assert.equal(new Headers(c.init.headers).get('x-goog-api-key'), KEY);
   }
   assert.ok(!logs.join('\n').includes(KEY), '로그에 키');
+});
+
+// 26.11.25 실제 시험: 3.8 Flash가 503(high demand)을 계속 돌려 두 칸 다 실패 → 더 오래 다시 묻고, 그래도 붐비면 다음 모델로
+const busy = () => json({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }, 503);
+test('writePlan: 첫 모델이 계속 503이면 다음 모델로 넘어가 설계도를 받음 (첫 모델에 5번 다시 물은 뒤)', async () => {
+  const urls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.includes(':generateContent')) { urls.push(u); return u.includes(`/models/${MODELS.text}:`) ? busy() : json(planReply()); }
+    return new Response('no', { status: 404 });
+  };
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 6);
+  assert.ok(urls.at(-1).includes(`/models/${MODELS.textFallback[0]}:`), urls.at(-1));
+});
+test('writePlan: 모든 모델이 붐비면 "Gemini가 붐벼요" 안내로 실패, 400 같은 요청 오류는 다음 모델로 안 넘어감', async () => {
+  globalThis.fetch = async (url) => (String(url).includes(':generateContent') ? busy() : new Response('no', { status: 404 }));
+  await assert.rejects(writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep }), /Gemini가 붐벼요/);
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); return json({ error: { code: 400, message: 'bad' } }, 400); };
+  await assert.rejects(writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep }));
+  assert.ok(urls.every((u) => u.includes(`/models/${MODELS.text}:`)), urls.join(' '));
+});
+test('speak: 목소리 모델이 계속 503이면 다음 목소리 모델로 (같은 voice)', async () => {
+  const models = [];
+  globalThis.fetch = async (url, init) => { const b = JSON.parse(String(init.body)); models.push(b.model); return b.model === MODELS.tts ? busy() : json(ttsResp()); };
+  const t = await speak({ key: KEY, lines: ['안녕'], voice: fin.voice, style: fin.style, outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep });
+  assert.ok(t.total > 0);
+  assert.equal(models.at(-1), MODELS.ttsFallback[0]);
 });

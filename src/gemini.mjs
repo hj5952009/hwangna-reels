@@ -12,13 +12,27 @@ const BASE = 'https://generativelanguage.googleapis.com';
 export const MODELS = {
   text: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
+  // 첫 모델이 붐비면(503 high demand 등) 차례로 넘어갈 모델 (26.11.25 실제 시험에서 3.8 Flash 503으로 두 칸 실패)
+  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-2.5-flash,gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
+  ttsFallback: (process.env.GEMINI_TTS_FALLBACK || 'gemini-3.8-flash-lite-tts').split(',').map((x) => x.trim()).filter(Boolean),
 };
+const BUSY_MSG = 'Gemini가 붐벼요 (모든 모델이 바빠요) — 잠시 뒤 다시 만들기를 눌러 주세요';
+// 다음 모델로 넘어가도 되는 오류: 서버 붐빔·과부하(5xx)와 분당 한도(429, 하루 한도 아님)
+const isBusy = (e) => !!e && (e.status >= 500 || (e.status === 429 && !e.perDay));
+// 모델 목록을 차례로 써 본다 — 붐빔이면 다음 모델, 다른 오류는 바로 throw
+async function withModels(models, fn) {
+  let last;
+  for (const m of models) {
+    try { return await fn(m); } catch (e) { if (!isBusy(e)) throw e; last = e; }
+  }
+  throw Object.assign(new Error(BUSY_MSG), { status: last && last.status, busy: true });
+}
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 오류 문구에서 키를 지움
 const scrub = (key, s) => (key ? String(s).split(key).join('***') : String(s));
 
-async function call(key, url, init = {}, { sleep = realSleep, retries = 3 } = {}) {
+async function call(key, url, init = {}, { sleep = realSleep, retries = 5 } = {}) {
   const headers = new Headers(init.headers || {});
   headers.set('x-goog-api-key', key);
   for (let attempt = 0; ; attempt++) {
@@ -28,12 +42,12 @@ async function call(key, url, init = {}, { sleep = realSleep, retries = 3 } = {}
     try { body = await res.json(); } catch { /* 본문 없음 */ }
     // 무료 등급 하루 한도(PerDay)는 다시 시도해도 안 되고 한도만 더 깎이므로 바로 멈춘다 (태평양 자정 = 한국 17시에 다시 참)
     if (res.status === 429 && /PerDay/.test(JSON.stringify((body && body.error && body.error.details) || []))) {
-      throw new Error('Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)');
+      throw Object.assign(new Error('Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)'), { status: 429, perDay: true });
     }
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt >= retries) {
       const msg = (body && body.error && body.error.message) || '';
-      throw new Error(scrub(key, `Gemini ${res.status}${msg ? `: ${msg.slice(0, 200)}` : ''}`));
+      throw Object.assign(new Error(scrub(key, `Gemini ${res.status}${msg ? `: ${msg.slice(0, 200)}` : ''}`)), { status: res.status });
     }
     await sleep(Math.min(30000, 2000 * 2 ** attempt));
   }
@@ -73,11 +87,11 @@ export async function uploadFile(key, path, mimeType, { sleep = realSleep } = {}
 
 // 구조화 출력(JSON) 한 번 요청 — 깨진 JSON이면 SyntaxError
 async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {}) {
-  const res = await call(key, `${BASE}/v1beta/models/${MODELS.text}:generateContent`, {
+  const res = await withModels([MODELS.text, ...MODELS.textFallback], (model) => call(key, `${BASE}/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature } }),
-  }, { sleep });
+  }, { sleep }));
   const j = await res.json();
   const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
   return JSON.parse(text); // 깨진 JSON이면 throw
@@ -298,16 +312,16 @@ export async function speak({ key, lines, voice = CHARACTERS.econ.voice, style =
   mkdirSync(outDir, { recursive: true });
   const item = { type: 'text', text: lines.map((l) => toSpeech(String(l))).join(' <short pause> ') };
   if (style) item.annotations = [{ type: 'speech_metadata', style }];
-  const res = await call(key, `${BASE}/v1beta/interactions`, {
+  const res = await withModels([MODELS.tts, ...MODELS.ttsFallback], (model) => call(key, `${BASE}/v1beta/interactions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: MODELS.tts,
+      model,
       input: [{ type: 'user_input', content: [item] }],
       response_format: { type: 'audio' },
       generation_config: { speech_config: [{ voice }] },
     }),
-  }, { sleep, retries: 3 });
+  }, { sleep }));
   const j = await res.json();
   const audio = (j.steps || []).flatMap((st) => st.content || []).filter((c) => c.type === 'audio' && c.data).pop();
   if (!audio) throw new Error('목소리를 받지 못했어요');
