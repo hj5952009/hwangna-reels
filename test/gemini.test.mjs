@@ -191,11 +191,21 @@ test('speak: 요청 1번, 본문에 <short pause>, style은 speech_metadata에�
 });
 
 // 무료 등급 하루 한도를 넘기면 다시 시도해도 실패하고 한도만 더 깎이므로 바로 멈춘다
-test('speak: 하루 한도 초과(429 PerDay)면 다시 시도하지 않고 바로 알림', async () => {
+test('speak: 하루 한도 초과(429 PerDay)면 그 모델은 다시 시도하지 않고, 모든 목소리 모델이 한도면 하루 한도 알림', async () => {
   let tries = 0;
   globalThis.fetch = async () => { tries++; return json({ error: { code: 429, message: 'You exceeded your current quota', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }] } }, 429); };
   await assert.rejects(speak({ key: KEY, lines: ['안녕'], voice: fin.voice, style: fin.style, outDir: mkdtempSync(join(tmpdir(), 'sp-')), sleep: nosleep }), /하루 한도/);
-  assert.equal(tries, 1);
+  assert.equal(tries, 1 + MODELS.ttsFallback.length);
+});
+
+// 무료 하루 한도는 모델마다 따로(quotaId …PerProjectPerModel) — 첫 모델 몫이 떨어지면 다음 모델로 (26.11.25 두 번째 실패)
+test('writePlan: 첫 모델이 하루 한도(429 PerDay)면 다시 묻지 않고 바로 다음 모델로', async () => {
+  const urls = [];
+  const perDay = () => json({ error: { code: 429, message: 'quota', details: [{ violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }] } }, 429);
+  globalThis.fetch = async (url) => { const u = String(url); urls.push(u); return u.includes(`/models/${MODELS.text}:`) ? perDay() : json(planReply()); };
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 1);
 });
 
 test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () => {
@@ -217,7 +227,7 @@ test('키는 주소에 넣지 않고 로그에도 찍히지 않음', async () =>
 
 // 26.11.25 실제 시험: 3.8 Flash가 503(high demand)을 계속 돌려 두 칸 다 실패 → 더 오래 다시 묻고, 그래도 붐비면 다음 모델로
 const busy = () => json({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }, 503);
-test('writePlan: 첫 모델이 계속 503이면 다음 모델로 넘어가 설계도를 받음 (첫 모델에 5번 다시 물은 뒤)', async () => {
+test('writePlan: 첫 모델이 계속 503이면 다음 모델로 넘어가 설계도를 받음 (첫 모델에 3번 다시 물은 뒤)', async () => {
   const urls = [];
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url);
@@ -226,7 +236,7 @@ test('writePlan: 첫 모델이 계속 503이면 다음 모델로 넘어가 설�
   };
   const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
   assert.equal(p.scenes.at(-1).kind, 'outro');
-  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 6);
+  assert.equal(urls.filter((u) => u.includes(`/models/${MODELS.text}:`)).length, 4);
   assert.ok(urls.at(-1).includes(`/models/${MODELS.textFallback[0]}:`), urls.at(-1));
 });
 test('writePlan: 모든 모델이 붐비면 "Gemini가 붐벼요" 안내로 실패, 400 같은 요청 오류는 다음 모델로 안 넘어감', async () => {

@@ -17,22 +17,25 @@ export const MODELS = {
   ttsFallback: (process.env.GEMINI_TTS_FALLBACK || 'gemini-3.8-flash-lite-tts').split(',').map((x) => x.trim()).filter(Boolean),
 };
 const BUSY_MSG = 'Gemini가 붐벼요 (모든 모델이 바빠요) — 잠시 뒤 다시 만들기를 눌러 주세요';
-// 다음 모델로 넘어가도 되는 오류: 서버 붐빔·과부하(5xx)와 분당 한도(429, 하루 한도 아님)
-const isBusy = (e) => !!e && (e.status >= 500 || (e.status === 429 && !e.perDay));
-// 모델 목록을 차례로 써 본다 — 붐빔이면 다음 모델, 다른 오류는 바로 throw
+const PER_DAY_MSG = 'Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)';
+// 다음 모델로 넘어가도 되는 오류: 서버 붐빔·과부하(5xx)와 한도(429) — 무료 하루 한도도 모델마다 따로라(PerProjectPerModel) 넘어간다
+const canFallback = (e) => !!e && (e.status >= 500 || e.status === 429);
+// 모델 목록을 차례로 써 본다 — 붐빔·한도면 다음 모델, 다른 오류(400 등)는 바로 throw
 async function withModels(models, fn) {
-  let last;
+  const errs = [];
   for (const m of models) {
-    try { return await fn(m); } catch (e) { if (!isBusy(e)) throw e; last = e; }
+    try { return await fn(m); } catch (e) { if (!canFallback(e)) throw e; errs.push(e); }
   }
-  throw Object.assign(new Error(BUSY_MSG), { status: last && last.status, busy: true });
+  const allPerDay = errs.length && errs.every((e) => e.perDay);
+  throw Object.assign(new Error(allPerDay ? PER_DAY_MSG : BUSY_MSG), { status: errs.at(-1) && errs.at(-1).status, busy: !allPerDay, perDay: allPerDay });
 }
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 오류 문구에서 키를 지움
 const scrub = (key, s) => (key ? String(s).split(key).join('***') : String(s));
 
-async function call(key, url, init = {}, { sleep = realSleep, retries = 5 } = {}) {
+// 붐빔(5xx)·분당 한도는 3번까지 5·15·30초 쉬고 다시 — 실패한 요청도 무료 몫을 깎을 수 있어 그 뒤엔 다음 모델로 (withModels)
+async function call(key, url, init = {}, { sleep = realSleep, retries = 3 } = {}) {
   const headers = new Headers(init.headers || {});
   headers.set('x-goog-api-key', key);
   for (let attempt = 0; ; attempt++) {
@@ -42,14 +45,14 @@ async function call(key, url, init = {}, { sleep = realSleep, retries = 5 } = {}
     try { body = await res.json(); } catch { /* 본문 없음 */ }
     // 무료 등급 하루 한도(PerDay)는 다시 시도해도 안 되고 한도만 더 깎이므로 바로 멈춘다 (태평양 자정 = 한국 17시에 다시 참)
     if (res.status === 429 && /PerDay/.test(JSON.stringify((body && body.error && body.error.details) || []))) {
-      throw Object.assign(new Error('Gemini 429: 오늘 무료 하루 한도를 다 썼어요 (한국 시간 오후 5시에 다시 채워져요)'), { status: 429, perDay: true });
+      throw Object.assign(new Error(PER_DAY_MSG), { status: 429, perDay: true });
     }
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt >= retries) {
       const msg = (body && body.error && body.error.message) || '';
       throw Object.assign(new Error(scrub(key, `Gemini ${res.status}${msg ? `: ${msg.slice(0, 200)}` : ''}`)), { status: res.status });
     }
-    await sleep(Math.min(30000, 2000 * 2 ** attempt));
+    await sleep([5000, 15000, 30000][Math.min(attempt, 2)]);
   }
 }
 
