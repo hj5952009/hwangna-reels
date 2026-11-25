@@ -13,8 +13,8 @@ export const MODELS = {
   text: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
   // 첫 모델이 붐비면(503 high demand 등) 차례로 넘어갈 모델 (26.11.25 실제 시험에서 3.8 Flash 503으로 두 칸 실패)
-  // 2.5 Flash는 새 사용자에게 안 열림(404, 26.11.25 네 번째 시험) — 없는 모델은 404로 건너뛴다
-  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
+  // 2.5 Flash는 새 사용자에게 안 열림(404) — 목록은 models.yml(26.11.25)로 확인한 이 키의 글 모델. 무료 하루 몫이 모델마다 따로라 차례로 넘어간다
+  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
   ttsFallback: (process.env.GEMINI_TTS_FALLBACK || 'gemini-3.8-flash-lite-tts').split(',').map((x) => x.trim()).filter(Boolean),
 };
 const BUSY_MSG = 'Gemini가 붐벼요 (모든 모델이 바빠요) — 잠시 뒤 다시 만들기를 눌러 주세요';
