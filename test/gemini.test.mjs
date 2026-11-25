@@ -305,3 +305,18 @@ test('모델을 넘길 때 로그에는 모델 이름과 상태 번호만 (키·
   assert.ok(!logs.join('\n').includes(KEY));
   assert.ok(!logs.join('\n').includes('high demand'));
 });
+
+// 26.11.25 여섯 번째 실제 시험(금융): 대체 모델(스키마 없이)이 두 번 다 장면 하나의 data를 비움 → 그 장면만 빼고 쓴다 (근거 확인처럼)
+test('writePlan: 두 번 다 몇 장면의 data만 틀리면 그 장면만 빼고 씀 (남은 장면·길이가 되면)', async () => {
+  const broken = () => planReply((p) => { p.scenes.find((s) => s.kind === 'keyword').data = { word: '', easy: '' }; return p; });
+  globalThis.fetch = fakeGemini([broken(), broken()], []);
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.ok(!p.scenes.some((s) => s.kind === 'keyword'), '틀린 장면이 남음');
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(p.scenes[0].kind, 'question');
+});
+test('writePlan: 첫 장면 data가 틀리면 빼지 않고 실패', async () => {
+  const broken = () => planReply((p) => { p.scenes[0].data = {}; return p; });
+  globalThis.fetch = fakeGemini([broken(), broken()], []);
+  await assert.rejects(writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep }), /설계도를 만들지 못했어요/);
+});

@@ -14,7 +14,7 @@ export const MODELS = {
   tts: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
   // 첫 모델이 붐비면(503 high demand 등) 차례로 넘어갈 모델 (26.11.25 실제 시험에서 3.8 Flash 503으로 두 칸 실패)
   // 2.5 Flash는 새 사용자에게 안 열림(404, 26.11.25 네 번째 시험) — 없는 모델은 404로 건너뛴다
-  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-3.8-flash-lite,gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
+  textFallback: (process.env.GEMINI_TEXT_FALLBACK || 'gemini-3.5-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
   ttsFallback: (process.env.GEMINI_TTS_FALLBACK || 'gemini-3.8-flash-lite-tts').split(',').map((x) => x.trim()).filter(Boolean),
 };
 const BUSY_MSG = 'Gemini가 붐벼요 (모든 모델이 바빠요) — 잠시 뒤 다시 만들기를 눌러 주세요';
@@ -259,6 +259,12 @@ export async function writePlan({ key, sources, notes = '', meta, sleep = realSl
     if (!v.length) return plan;
     // 마지막 시도: 글자 상한을 조금(1.5배까지) 넘긴 것뿐이면 그대로 쓴다 (그리기가 줄여 그림)
     if (attempt === 1 && !validatePlan(plan, { names, slack: SLACK }).length) return plan;
+    // 마지막 시도: 몇 장면의 data만 틀렸으면 그 장면만 빼고 쓴다 (첫 장면·끝장은 빼지 않음, 근거 확인처럼 하한을 낮춰 다시 검사)
+    if (attempt === 1) {
+      const scenes = plan.scenes.filter((s, i) => i === 0 || s.kind === 'outro' || !checkData(s.kind, s.data, SLACK).length);
+      const pruned = { ...plan, scenes };
+      if (scenes.length < plan.scenes.length && !validatePlan(pruned, { names, minChars: CHECK_MIN_CHARS, slack: SLACK }).length) return pruned;
+    }
     problems = v;
   }
   throw new Error(scrub(key, `설계도를 만들지 못했어요: ${problems.join(' / ')}`));
