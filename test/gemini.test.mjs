@@ -281,3 +281,27 @@ test('Gemini 요청마다 시간 제한(AbortSignal)이 걸림 — 답이 없으
   await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
   assert.ok(sigs.length >= 1 && sigs.every((s) => s instanceof AbortSignal), '시간 제한 없음');
 });
+
+// 26.11.25 다섯 번째 실제 시험: 대체 모델이 설계도 스키마를 '너무 복잡(too many states)'하다고 400 → 스키마는 글로 주고 JSON만 요구해 같은 모델에 한 번 더
+test('writePlan: 스키마가 너무 복잡하다는 400이면 같은 모델에 스키마를 글로 넣어 다시 묻고 설계도를 받음', async () => {
+  const bodies = [];
+  const tooMany = () => json({ error: { code: 400, message: 'The specified schema produces a constraint that has too many states for serving.' } }, 400);
+  globalThis.fetch = async (url, init = {}) => { const b = JSON.parse(String(init.body)); bodies.push({ url: String(url), b }); return b.generationConfig.responseJsonSchema ? tooMany() : json(planReply()); };
+  const p = await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  assert.equal(p.scenes.at(-1).kind, 'outro');
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].url, bodies[1].url, '같은 모델');
+  assert.equal(bodies[1].b.generationConfig.responseMimeType, 'application/json');
+  assert.ok(bodies[1].b.contents[0].parts.some((x) => x.text && x.text.includes('"scenes"')), '스키마를 글로 넣음');
+});
+test('모델을 넘길 때 로그에는 모델 이름과 상태 번호만 (키·내용 없음)', async () => {
+  const logs = []; const orig = console.log; console.log = (...a) => logs.push(a.join(' '));
+  try {
+    globalThis.fetch = async (url) => (String(url).includes(`/models/${MODELS.text}:`) ? busy() : json(planReply()));
+    await writePlan({ key: KEY, sources: SRC, notes: '', meta: pmeta, sleep: nosleep });
+  } finally { console.log = orig; }
+  const line = logs.find((l) => l.includes(MODELS.text));
+  assert.ok(line && line.includes('503'), logs.join('\n'));
+  assert.ok(!logs.join('\n').includes(KEY));
+  assert.ok(!logs.join('\n').includes('high demand'));
+});

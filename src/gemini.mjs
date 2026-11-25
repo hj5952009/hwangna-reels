@@ -28,7 +28,12 @@ const REQ_TIMEOUT_MS = Number(process.env.GEMINI_REQ_TIMEOUT_MS) || 150000;
 async function withModels(models, fn) {
   const errs = [];
   for (const m of models) {
-    try { return await fn(m); } catch (e) { if (!canFallback(e)) throw e; errs.push(e); }
+    try { return await fn(m); } catch (e) {
+      if (!canFallback(e)) throw e;
+      errs.push(e);
+      // 원인 찾기용: 모델 이름과 상태 번호만 남긴다 (키·발표 내용·오류 본문은 안 찍음)
+      console.log(`[gemini] ${m} ${e.network ? 'network' : e.status || '?'}${e.perDay ? ' PerDay' : ''} → 다음 모델`);
+    }
   }
   const allPerDay = errs.length && errs.every((e) => e.perDay);
   throw Object.assign(new Error(allPerDay ? PER_DAY_MSG : BUSY_MSG), { status: errs.at(-1) && errs.at(-1).status, busy: !allPerDay, perDay: allPerDay });
@@ -102,11 +107,21 @@ export async function uploadFile(key, path, mimeType, { sleep = realSleep } = {}
 
 // 구조화 출력(JSON) 한 번 요청 — 깨진 JSON이면 SyntaxError
 async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {}) {
-  const res = await withModels([MODELS.text, ...MODELS.textFallback], (model) => call(key, `${BASE}/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature } }),
-  }, { sleep }));
+  const res = await withModels([MODELS.text, ...MODELS.textFallback], async (model) => {
+    const ask = (generationConfig, extra = []) => call(key, `${BASE}/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [...parts, ...extra] }], generationConfig }),
+    }, { sleep });
+    try {
+      return await ask({ responseMimeType: 'application/json', responseJsonSchema: schema, temperature });
+    } catch (e) {
+      // 모델에 따라 설계도 스키마가 '너무 복잡(too many states)'하다고 400 (26.11.25 다섯 번째 시험)
+      // → 스키마는 글로 주고 JSON만 요구해 같은 모델에 한 번 더 (결과는 규칙 검사가 다시 봄)
+      if (e.status !== 400 || !/too many states|schema/i.test(e.message)) throw e;
+      return await ask({ responseMimeType: 'application/json', temperature }, [{ text: `출력은 아래 JSON 스키마를 그대로 따르는 JSON 하나만 써요:\n${JSON.stringify(schema)}` }]);
+    }
+  });
   const j = await res.json();
   const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
   return JSON.parse(text); // 깨진 JSON이면 throw
