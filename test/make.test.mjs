@@ -247,6 +247,14 @@ test('로그에 단계 이름만', async () => {
   for (const l of logs) assert.match(l, /^\[(econ|fin)\] [가-힣 ]+$/);
 });
 
+test('freshBundle: 더 새 요청이 이미 있으면(앞 요청이 합쳐짐) 기다리지 않고 null', async () => {
+  const { freshBundle } = await import('../make.mjs');
+  const slept = [];
+  const b = await freshBundle({ bundle: async () => ({ request: { at: 300, slots: ['econ', 'fin'] } }) }, WID, 200, { sleep: async (ms) => slept.push(ms) });
+  assert.equal(b, null);
+  assert.equal(slept.length, 0);
+});
+
 test('freshBundle: dispatch의 요청 번호와 같은 묶음을 읽을 때까지 기다림 (KV 지역 지연)', async () => {
   const { freshBundle } = await import('../make.mjs');
   let n = 0; const slept = [];

@@ -114,11 +114,14 @@ async function makeSlot({ wid, slot, bundle, rerender, client, key, deps, work, 
 
 // 서버 KV는 지역마다 최대 60초 늦게 보일 수 있어, dispatch에 실린 요청 번호(req)와 같은 묶음을 읽을 때까지 기다린다.
 // reqAt이 없으면(손으로 실행) 첫 묶음을 그대로 쓴다.
+// 더 새 요청이 보이면 null: 서버가 아직 시작 안 한 앞 요청의 칸을 새 요청에 합쳤으니 새 요청의 실행이 맡는다.
 export async function freshBundle(client, wid, reqAt, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), tries = 13, waitMs = 10000 } = {}) {
   const want = Number(reqAt) || 0;
   for (let i = 0; ; i += 1) {
     const b = await client.bundle(wid);
-    if (!want || Number((b.request || {}).at) === want) return b;
+    const at = Number((b.request || {}).at) || 0;
+    if (!want || at === want) return b;
+    if (at > want) return null;
     if (i + 1 >= tries) throw new Error('최신 요청을 서버에서 읽지 못했어요 — 앱에서 다시 만들어 주세요');
     await sleep(waitMs);
   }
@@ -155,6 +158,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   if (!/^w-\d{4}-\d{2}-\d{2}$|^w-test$/.test(String(wid))) { console.error('주 id 형식이 아니에요'); process.exit(2); }
   const client = createClient({ url: process.env.WORKER_URL, renderKey: process.env.RENDER_KEY });
   const bundle = await freshBundle(client, wid, process.env.REQ_AT);
+  if (!bundle) { console.log('{"superseded":true}'); process.exit(0); } // 뒤 요청에 합쳐짐
   const req = bundle.request || {};
   const slots = (req.slots || ['econ', 'fin']).filter((s) => s === 'econ' || s === 'fin');
   const key = process.env.GEMINI_API_KEY || '';
