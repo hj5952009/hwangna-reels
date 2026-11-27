@@ -1,0 +1,33 @@
+# 위클리 인스타 표지 장면 뽑기 — 업로드 서버(Worker)가 repository_dispatch(cover)로 부른다 (운영실 ⑦-35)
+# 발표 자료·장면은 저장소·로그·artifact에 남기지 않는다 (cover.mjs가 단계 이름·상태 번호만 찍음).
+# 바깥 꾸러미가 필요 없어 npm ci·브라우저 설치를 건너뛴다 (빨리 끝나게).
+name: cover
+on:
+  repository_dispatch:
+    types: [cover]
+
+concurrency:
+  group: cover-${{ github.event.client_payload.wid }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scenes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: 표지 장면 뽑기
+        env:
+          WID: ${{ github.event.client_payload.wid }}
+          SLOT: ${{ github.event.client_payload.slot }}
+          REQ_AT: ${{ github.event.client_payload.req }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RENDER_KEY: ${{ secrets.RENDER_KEY }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+        run: node cover.mjs

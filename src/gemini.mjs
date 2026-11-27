@@ -106,7 +106,7 @@ export async function uploadFile(key, path, mimeType, { sleep = realSleep } = {}
 }
 
 // 구조화 출력(JSON) 한 번 요청 — 깨진 JSON이면 SyntaxError
-async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {}) {
+export async function generateJson(key, parts, schema, { sleep, temperature = 0.7 } = {}) {
   const res = await withModels([MODELS.text, ...MODELS.textFallback], async (model) => {
     const ask = (generationConfig, extra = []) => call(key, `${BASE}/v1beta/models/${model}:generateContent`, {
       method: 'POST',

@@ -5,6 +5,8 @@
 //   PUT  /reels/<wid>/out/<slot>/<video|cover>?part=i&of=N → 마지막 조각 응답 {url}
 //   PUT|GET /reels/<wid>/saved/<slot>/<plan|voice>   다시 굽기용 저장본
 //   POST /reels/<wid>/state  {slot, state, ...}
+//   GET  /reels/<wid>/coverjob?slot=          → 표지 장면 뽑기로 맡긴 일 (cover.mjs)
+//   POST /reels/<wid>/coverout {slot, req, raw, check}|{slot, req, error, status}
 export const PART = 20 * 1024 * 1024; // KV 값 25MB 한도 아래
 
 export function createClient({ url, renderKey, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
@@ -41,6 +43,8 @@ export function createClient({ url, renderKey, sleep = (ms) => new Promise((r) =
       await req(`/reels/${wid}/saved/${slot}/${kind}`, { method: 'PUT', headers: { 'Content-Type': kind === 'voice' ? 'audio/wav' : 'application/json' }, body: buf });
     },
     getSaved: async (wid, slot, kind) => Buffer.from(await (await req(`/reels/${wid}/saved/${slot}/${kind}`)).arrayBuffer()),
+    coverJob: async (wid, slot) => (await req(`/reels/${wid}/coverjob?slot=${encodeURIComponent(slot)}`)).json(),
+    coverOut: async (wid, body) => { await req(`/reels/${wid}/coverout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
     state: async (wid, slot, st) => { await req(`/reels/${wid}/state`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot, ...st }) }); },
   };
 }
